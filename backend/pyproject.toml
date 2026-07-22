@@ -1,0 +1,50 @@
+[project]
+name = "casalista-voice-api"
+version = "0.1.0"
+description = "Backend inicial de perfilamiento para CasaLista Voice (Hackathon Colsubsidio)"
+requires-python = ">=3.11"
+dependencies = [
+  "fastapi>=0.115.0",
+  "uvicorn[standard]>=0.32.0",
+  "pydantic>=2.9.0",
+  "pydantic-settings>=2.6.0",
+  "python-dotenv>=1.0.1",
+  "pandas>=2.2.0",
+  "openpyxl>=3.1.5",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8.3.0",
+  "httpx>=0.27.0",
+  "ruff>=0.8.0",
+  "mypy>=1.13.0",
+  "pandas-stubs>=2.2.0",
+]
+
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+src = ["app", "scripts", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
+ignore = ["B008"]
+
+[tool.ruff.lint.per-file-ignores]
+"scripts/*" = ["E402"]
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = true
+packages = ["app"]
+mypy_path = "."
+explicit_package_bases = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+filterwarnings = ["ignore::DeprecationWarning"]
