@@ -63,3 +63,7 @@ class VoiceCompleteResponse(BaseModel):
     navigation_path: str
     assistant_closing: str
     disclaimer: str
+    spoken_summary: str | None = None
+    recommended_projects: list[dict[str, Any]] = Field(default_factory=list)
+    profile_json_path: str | None = None
+    engine: str | None = None

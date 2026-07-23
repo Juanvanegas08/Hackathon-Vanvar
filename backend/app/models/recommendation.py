@@ -56,6 +56,10 @@ class ProjectRecommendation(BaseModel):
     historical_profile_available: bool = False
     aliases: list[str] = Field(default_factory=list)
     metadata: dict[str, Any] = Field(default_factory=dict)
+    reason: str | None = None
+    probability: float | None = Field(default=None, ge=0, le=1)
+    pros: list[str] = Field(default_factory=list)
+    cons: list[str] = Field(default_factory=list)
 
 
 class RecommendationResult(BaseModel):
@@ -73,3 +77,6 @@ class RecommendationResult(BaseModel):
     general_warnings: list[str] = Field(default_factory=list)
     disclaimer: str
     generated_at: datetime
+    spoken_summary: str | None = None
+    engine: str = "deterministic"
+    profile_json_path: str | None = None

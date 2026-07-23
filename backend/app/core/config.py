@@ -72,6 +72,22 @@ class Settings(BaseSettings):
         default=20,
         alias="OPENAI_REQUEST_TIMEOUT_SECONDS",
     )
+    openai_recommender_enabled: bool = Field(
+        default=True,
+        alias="OPENAI_RECOMMENDER_ENABLED",
+    )
+    openai_recommender_model: str = Field(
+        default="gpt-4.1-mini",
+        alias="OPENAI_RECOMMENDER_MODEL",
+    )
+    lead_profiles_path: str = Field(
+        default="./data/profiles",
+        alias="LEAD_PROFILES_PATH",
+    )
+    prefer_openai_recommendations: bool = Field(
+        default=True,
+        alias="PREFER_OPENAI_RECOMMENDATIONS",
+    )
 
     @field_validator("cors_origins", mode="before")
     @classmethod

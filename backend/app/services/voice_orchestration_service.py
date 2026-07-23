@@ -177,18 +177,40 @@ class VoiceOrchestrationService:
         recommendations = None
         top_project: dict[str, str] | None = None
         recommendations_count = 0
+        spoken_summary: str | None = None
+        recommended_projects: list[dict[str, object]] = []
+        profile_json_path: str | None = None
+        engine: str | None = None
         if self._recommendations is not None:
             refreshed = self._leads.get_lead(lead_id)
             recommendations = self._recommendations.recommend_for_lead(
                 refreshed,
                 limit=3,
+                persist_profile=True,
+                brochure_only=True,
             )
             recommendations_count = len(recommendations.recommended_projects)
+            spoken_summary = recommendations.spoken_summary
+            profile_json_path = recommendations.profile_json_path
+            engine = recommendations.engine
+            recommended_projects = [
+                {
+                    "project_name": item.project_name,
+                    "reason": item.reason,
+                    "probability": item.probability,
+                    "compatibility_score": item.compatibility_score,
+                    "brochure_url": item.brochure_url,
+                    "rank": item.rank,
+                }
+                for item in recommendations.recommended_projects
+            ]
             if recommendations.recommended_projects:
                 first = recommendations.recommended_projects[0]
                 top_project = {
                     "id": first.canonical_project_id,
                     "name": first.project_name,
+                    "reason": first.reason or "",
+                    "brochure_url": first.brochure_url or "",
                 }
 
         closing = (
@@ -205,6 +227,8 @@ class VoiceOrchestrationService:
                 "Ya terminé de construir tu perfil. "
                 "Encontré tres opciones que pueden ajustarse a ti."
             )
+        if spoken_summary:
+            closing = f"{closing} {spoken_summary}"
 
         return VoiceCompleteResponse(
             completed=True,
@@ -219,6 +243,10 @@ class VoiceOrchestrationService:
             navigation_path=f"/results/{lead_id}",
             assistant_closing=closing,
             disclaimer=readiness.disclaimer,
+            spoken_summary=spoken_summary,
+            recommended_projects=recommended_projects,
+            profile_json_path=profile_json_path,
+            engine=engine,
         )
 
     def _apply_confirmation(

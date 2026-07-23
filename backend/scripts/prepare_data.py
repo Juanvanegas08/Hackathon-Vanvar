@@ -222,6 +222,28 @@ def prepare_projects(
                 ),
                 None,
             )
+            ubicacion_col = next(
+                (
+                    c
+                    for c in brochure_df.columns
+                    if any(
+                        token in (normalize_for_comparison(c) or "")
+                        for token in ("ubicacion", "ciudad", "municipio", "zona")
+                    )
+                ),
+                None,
+            )
+            status_col = next(
+                (
+                    c
+                    for c in brochure_df.columns
+                    if "status" in (normalize_for_comparison(c) or "")
+                    or "estado" in (normalize_for_comparison(c) or "")
+                ),
+                None,
+            )
+            if ubicacion_col is not None:
+                brochure_df[ubicacion_col] = brochure_df[ubicacion_col].ffill()
             if name_col is None:
                 warnings.append("No se pudo identificar columna de proyecto en brochures")
             else:
@@ -230,8 +252,17 @@ def prepare_projects(
                     if not name:
                         continue
                     key = normalize_for_comparison(name) or name
+                    ubicacion = (
+                        strip_text(row.get(ubicacion_col)) if ubicacion_col else None
+                    )
+                    if ubicacion and ubicacion.lower() == "nan":
+                        ubicacion = None
                     brochure_by_name[key] = {
                         "nombre": name,
+                        "ubicacion": ubicacion,
+                        "status": (
+                            strip_text(row.get(status_col)) if status_col else None
+                        ),
                         "brochure_url": strip_text(row.get(url_col)) if url_col else None,
                         "recorrido_360_url": (
                             strip_text(row.get(tour_col)) if tour_col else None
@@ -301,13 +332,18 @@ def prepare_projects(
             ubicacion_values = top_values(group, "ubicacion", 1)
             municipio_values = top_values(group, "municipio", 1)
             departamento_values = top_values(group, "departamento", 1)
+            ubicacion = (
+                ubicacion_values[0]
+                if ubicacion_values
+                else brochure.get("ubicacion")
+            )
             projects[key] = {
                 "id": str(uuid.uuid4()),
                 "nombre": name,
                 "codigo": None,
                 "etapa": etapa_values[0] if etapa_values else None,
-                "ubicacion": ubicacion_values[0] if ubicacion_values else None,
-                "municipio": municipio_values[0] if municipio_values else None,
+                "ubicacion": ubicacion,
+                "municipio": municipio_values[0] if municipio_values else ubicacion,
                 "departamento": departamento_values[0] if departamento_values else None,
                 "valor_minimo": valor_min,
                 "valor_maximo": valor_max,
@@ -326,6 +362,12 @@ def prepare_projects(
                 "metadata": {
                     "historical_rows": int(len(group)),
                     "source": "buyers_history",
+                    "brochure_status": brochure.get("status"),
+                    **(
+                        {"brochure_raw": brochure.get("metadata", {})}
+                        if brochure.get("metadata")
+                        else {}
+                    ),
                 },
             }
     else:
@@ -343,8 +385,8 @@ def prepare_projects(
             "nombre": brochure["nombre"],
             "codigo": None,
             "etapa": None,
-            "ubicacion": None,
-            "municipio": None,
+            "ubicacion": brochure.get("ubicacion"),
+            "municipio": brochure.get("ubicacion"),
             "departamento": None,
             "valor_minimo": None,
             "valor_maximo": None,
@@ -356,11 +398,17 @@ def prepare_projects(
                 "salary_range_distribution": {},
                 "segments": {},
                 "dependents_distribution": {},
-                "frequent_locations": [],
+                "frequent_locations": (
+                    [brochure["ubicacion"]] if brochure.get("ubicacion") else []
+                ),
                 "frequent_financial_entities": [],
                 "frequent_companies": [],
             },
-            "metadata": brochure.get("metadata", {}),
+            "metadata": {
+                "source": "brochures",
+                "brochure_status": brochure.get("status"),
+                "brochure_raw": brochure.get("metadata", {}),
+            },
         }
 
     return list(projects.values()), warnings

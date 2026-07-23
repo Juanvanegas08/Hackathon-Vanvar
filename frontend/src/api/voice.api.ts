@@ -59,11 +59,27 @@ export interface VoiceCompleteResponse {
     confidence: string
   }
   recommendations_count: number
-  top_project?: { id: string; name: string } | null
+  top_project?: {
+    id: string
+    name: string
+    reason?: string
+    brochure_url?: string
+  } | null
   next_action: string
   navigation_path: string
   assistant_closing: string
   disclaimer: string
+  spoken_summary?: string | null
+  recommended_projects?: Array<{
+    project_name: string
+    reason?: string | null
+    probability?: number | null
+    compatibility_score?: number
+    brochure_url?: string | null
+    rank?: number
+  }>
+  profile_json_path?: string | null
+  engine?: string | null
 }
 
 export const createRealtimeClientSecret = async (leadId: string) =>

@@ -146,8 +146,31 @@ export const ResultsPage = () => {
             <h2 className="font-display text-3xl">Proyectos sugeridos</h2>
             <p className="text-sm text-[var(--color-muted)]">
               {uniqueCanonical.size} canónicos · sin duplicados
+              {recommendations?.engine ? ` · motor ${recommendations.engine}` : ''}
             </p>
           </div>
+
+          {recommendations?.spoken_summary && (
+            <div className="mb-6 rounded-3xl border border-[var(--color-line)] bg-white/90 p-5">
+              <p className="text-sm font-semibold uppercase tracking-[0.14em] text-[var(--color-green)]">
+                Recomendación en voz
+              </p>
+              <p className="mt-3 text-lg leading-relaxed text-[var(--color-ink)]">
+                {recommendations.spoken_summary}
+              </p>
+              {projects[0]?.brochure_url && (
+                <a
+                  href={projects[0].brochure_url}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="mt-4 inline-flex text-sm font-semibold text-[var(--color-blue)] underline"
+                >
+                  Abrir brochure de {projects[0].project_name}
+                </a>
+              )}
+            </div>
+          )}
+
           <div className="grid gap-5 lg:grid-cols-3">
             {projects.map((project) => (
               <ProjectCard

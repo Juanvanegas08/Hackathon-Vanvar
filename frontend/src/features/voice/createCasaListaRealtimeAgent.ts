@@ -117,9 +117,11 @@ export const createCasaListaRealtimeAgent = (options: CasaListaAgentOptions) => 
       return JSON.stringify({
         completed: result.completed,
         assistant_closing: result.assistant_closing,
+        spoken_summary: result.spoken_summary,
         navigation_path: result.navigation_path,
         recommendations_count: result.recommendations_count,
         top_project: result.top_project,
+        recommended_projects: result.recommended_projects,
         disclaimer: result.disclaimer,
       })
     },
@@ -132,6 +134,7 @@ export const createCasaListaRealtimeAgent = (options: CasaListaAgentOptions) => 
       AGENT_INSTRUCTIONS,
       displayName ? `El nombre visible del usuario es ${displayName}.` : '',
       'Al iniciar, llama get_voice_context antes de saludar.',
+      'Cuando complete_voice_profile responda, di en voz alta assistant_closing o spoken_summary: nombra el proyecto, di por qué y menciona el link del brochure si existe.',
     ]
       .filter(Boolean)
       .join('\n'),

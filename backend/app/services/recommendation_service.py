@@ -1,8 +1,10 @@
-"""Explainable, deterministic project recommendation engine."""
+"""Explainable project recommendation engine with optional OpenAI ranking."""
 
 from __future__ import annotations
 
+import logging
 from datetime import UTC, datetime
+from typing import Any
 
 from app.core.config import Settings, get_settings
 from app.core.constants import (
@@ -12,6 +14,7 @@ from app.core.constants import (
     RECOMMENDATION_ESSENTIAL_FIELDS,
     RECOMMENDATION_WEIGHTS,
 )
+from app.core.exceptions import ConfigurationError, RealtimeServiceError
 from app.models.evaluation import ConfidenceLevel
 from app.models.lead import Lead
 from app.models.project import Project
@@ -22,15 +25,19 @@ from app.models.recommendation import (
     RecommendationStatus,
     RegulatoryContext,
 )
+from app.providers.openai_recommendation_provider import OpenAIRecommendationProvider
 from app.repositories.project_repository import ProjectRepository
+from app.services.profile_persistence_service import ProfilePersistenceService
 from app.services.project_canonicalization_service import ProjectCanonicalizationService
 from app.services.project_profile_service import ProjectProfileService
 from app.utils.normalization import normalize_for_comparison
 from app.utils.project_matching import text_overlap_score
 
+logger = logging.getLogger(__name__)
+
 
 class RecommendationService:
-    """Rank projects for a lead using weighted, explainable criteria."""
+    """Rank projects for a lead using OpenAI when available, else weighted rules."""
 
     def __init__(
         self,
@@ -38,6 +45,8 @@ class RecommendationService:
         project_profile_service: ProjectProfileService | None = None,
         settings: Settings | None = None,
         weights: dict[str, int] | None = None,
+        openai_provider: OpenAIRecommendationProvider | None = None,
+        profile_persistence: ProfilePersistenceService | None = None,
     ) -> None:
         self._settings = settings or get_settings()
         self._profiles = project_profile_service or ProjectProfileService(
@@ -46,6 +55,12 @@ class RecommendationService:
         )
         self._canonical = ProjectCanonicalizationService(settings=self._settings)
         self._weights = weights or dict(RECOMMENDATION_WEIGHTS)
+        self._openai = openai_provider or OpenAIRecommendationProvider(
+            settings=self._settings
+        )
+        self._profile_persistence = profile_persistence or ProfilePersistenceService(
+            settings=self._settings
+        )
 
     def recommend_for_lead(
         self,
@@ -54,12 +69,23 @@ class RecommendationService:
         limit: int = 3,
         include_unavailable: bool = False,
         min_score: float | None = None,
+        persist_profile: bool = True,
+        brochure_only: bool = True,
     ) -> RecommendationResult:
         """Build ranked recommendations for a lead profile."""
         generated_at = datetime.now(UTC)
         missing_fields = self._missing_lead_fields(lead)
         profile_completeness = self._profile_completeness(lead)
         regulatory = self._regulatory_context(lead)
+        profile_path: str | None = None
+        profile_document: dict[str, Any] | None = None
+        if persist_profile:
+            try:
+                saved = self._profile_persistence.save_lead_profile(lead)
+                profile_path = str(saved)
+                profile_document = self._profile_persistence.build_document(lead)
+            except OSError:
+                logger.warning("No se pudo persistir el perfil del lead %s", lead.id)
 
         if not self._has_minimum_information(lead):
             return RecommendationResult(
@@ -77,9 +103,18 @@ class RecommendationService:
                 ],
                 disclaimer=RECOMMENDATION_DISCLAIMER,
                 generated_at=generated_at,
+                spoken_summary=(
+                    "Todavía me faltan algunos datos clave de tu perfil "
+                    "para recomendarte un proyecto con confianza."
+                ),
+                engine="none",
+                profile_json_path=profile_path,
             )
 
-        if not self._profiles.profiles_ready():
+        catalog_ready = self._profiles.profiles_ready() or bool(
+            self._profiles.repository.list_all()
+        )
+        if not catalog_ready:
             return RecommendationResult(
                 lead_id=lead.id,
                 recommendation_status=RecommendationStatus.PROFILES_UNAVAILABLE,
@@ -91,17 +126,226 @@ class RecommendationService:
                 required_fields=[],
                 regulatory_context=regulatory,
                 general_warnings=[
-                    "El motor de recomendaciones todavía no tiene perfiles "
-                    "de proyectos disponibles."
+                    "El motor de recomendaciones todavía no tiene proyectos "
+                    "disponibles en catálogo."
                 ],
                 disclaimer=RECOMMENDATION_DISCLAIMER,
                 generated_at=generated_at,
+                spoken_summary=(
+                    "Aún no tengo el catálogo de proyectos listo para recomendarte."
+                ),
+                engine="none",
+                profile_json_path=profile_path,
             )
 
         projects = self._profiles.repository.list_all()
         if not include_unavailable:
             projects = [project for project in projects if project.disponible]
+        if brochure_only:
+            with_brochure = [project for project in projects if project.brochure_url]
+            # Prefer brochure catalog when available; otherwise keep full catalog.
+            if with_brochure:
+                projects = with_brochure
 
+        if (
+            self._settings.prefer_openai_recommendations
+            and self._openai.enabled
+        ):
+            try:
+                return self._recommend_with_openai(
+                    lead=lead,
+                    projects=projects,
+                    limit=limit,
+                    min_score=min_score,
+                    generated_at=generated_at,
+                    missing_fields=missing_fields,
+                    profile_completeness=profile_completeness,
+                    regulatory=regulatory,
+                    profile_path=profile_path,
+                    profile_document=profile_document,
+                )
+            except (ConfigurationError, RealtimeServiceError) as exc:
+                logger.warning(
+                    "OpenAI recommender fallback to deterministic: %s",
+                    exc.message,
+                )
+
+        return self._recommend_deterministic(
+            lead=lead,
+            projects=projects,
+            limit=limit,
+            min_score=min_score,
+            generated_at=generated_at,
+            missing_fields=missing_fields,
+            profile_completeness=profile_completeness,
+            regulatory=regulatory,
+            profile_path=profile_path,
+        )
+
+    def _recommend_with_openai(
+        self,
+        *,
+        lead: Lead,
+        projects: list[Project],
+        limit: int,
+        min_score: float | None,
+        generated_at: datetime,
+        missing_fields: list[str],
+        profile_completeness: int,
+        regulatory: RegulatoryContext,
+        profile_path: str | None,
+        profile_document: dict[str, Any] | None,
+    ) -> RecommendationResult:
+        raw = self._openai.recommend(
+            lead,
+            projects,
+            limit=limit,
+            profile_document=profile_document,
+        )
+        by_id = {str(project.id): project for project in projects}
+        by_name = {
+            (normalize_for_comparison(project.nombre) or ""): project
+            for project in projects
+        }
+        recommendations: list[ProjectRecommendation] = []
+        for index, item in enumerate(raw.get("recommendations", []), start=1):
+            if not isinstance(item, dict):
+                continue
+            project = by_id.get(str(item.get("project_id") or ""))
+            if project is None:
+                name_key = normalize_for_comparison(str(item.get("project_name") or ""))
+                project = by_name.get(name_key or "")
+            if project is None:
+                continue
+
+            score = float(item.get("compatibility_score") or 0)
+            probability = item.get("probability")
+            if probability is None and score:
+                probability = round(score / 100.0, 4)
+            if min_score is not None and score < min_score:
+                continue
+
+            reason = str(item.get("reason") or "").strip() or None
+            pros = [str(value) for value in item.get("pros", []) if value]
+            cons = [str(value) for value in item.get("cons", []) if value]
+            matched: list[MatchedFactor] = []
+            if reason:
+                matched.append(
+                    MatchedFactor(
+                        factor="openai_reason",
+                        message=reason,
+                        contribution=round(min(100.0, max(0.0, score)), 2),
+                    )
+                )
+
+            canonical_id = str(
+                project.metadata.get("canonical_project_id")
+                or self._canonical.resolve_canonical_id(project.nombre)[0]
+            )
+            canonical_name = str(
+                project.metadata.get("canonical_name")
+                or self._canonical.resolve_canonical_id(project.nombre)[1]
+            )
+            aliases = [
+                str(alias)
+                for alias in project.metadata.get("aliases", [project.nombre])
+            ]
+            recommendations.append(
+                ProjectRecommendation(
+                    project_id=canonical_id,
+                    project_name=canonical_name,
+                    canonical_project_id=canonical_id,
+                    rank=int(item.get("rank") or index),
+                    compatibility_score=round(min(100.0, max(0.0, score)), 2),
+                    confidence=ConfidenceLevel.MEDIUM,
+                    matched_factors=matched,
+                    warnings=[],
+                    unavailable_factors=[],
+                    brochure_url=project.brochure_url or item.get("brochure_url"),
+                    tour_360_url=project.recorrido_360_url,
+                    municipio=project.municipio,
+                    departamento=project.departamento,
+                    etapa=project.etapa,
+                    historical_profile_available=project.perfil_historico.total_buyers > 0,
+                    aliases=aliases,
+                    metadata={
+                        "original_names": aliases,
+                        "catalog_project_id": str(project.id),
+                        "engine": "openai",
+                    },
+                    reason=reason,
+                    probability=(
+                        float(probability)
+                        if probability is not None
+                        else None
+                    ),
+                    pros=pros,
+                    cons=cons,
+                )
+            )
+
+        recommendations = self._dedupe_canonical(recommendations)
+        recommendations.sort(
+            key=lambda item: (
+                -(item.probability or item.compatibility_score / 100.0),
+                item.project_name.lower(),
+            )
+        )
+        top = recommendations[: max(1, min(limit, 10))] if recommendations else []
+        for index, item in enumerate(top, start=1):
+            item.rank = index
+
+        spoken = str(raw.get("spoken_summary") or "").strip() or None
+        if not spoken and top:
+            best = top[0]
+            spoken = (
+                f"Te recomiendo el proyecto {best.project_name}"
+                + (f" porque {best.reason}" if best.reason else "")
+                + (
+                    f". Puedes ver el brochure aquí: {best.brochure_url}."
+                    if best.brochure_url
+                    else "."
+                )
+            )
+
+        status = (
+            RecommendationStatus.NO_MATCHES
+            if not top
+            else RecommendationStatus.COMPLETED
+        )
+        return RecommendationResult(
+            lead_id=lead.id,
+            recommendation_status=status,
+            evaluated_projects=len(projects),
+            recommended_projects=top,
+            profile_completeness=profile_completeness,
+            overall_confidence=(
+                ConfidenceLevel.MEDIUM if top else ConfidenceLevel.LOW
+            ),
+            missing_lead_fields=missing_fields,
+            required_fields=[],
+            regulatory_context=regulatory,
+            general_warnings=[ECONOMIC_COMPATIBILITY_DISCLAIMER],
+            disclaimer=RECOMMENDATION_DISCLAIMER,
+            generated_at=generated_at,
+            spoken_summary=spoken,
+            engine="openai",
+            profile_json_path=profile_path,
+        )
+
+    def _recommend_deterministic(
+        self,
+        *,
+        lead: Lead,
+        projects: list[Project],
+        limit: int,
+        min_score: float | None,
+        generated_at: datetime,
+        missing_fields: list[str],
+        profile_completeness: int,
+        regulatory: RegulatoryContext,
+        profile_path: str | None,
+    ) -> RecommendationResult:
         scored: list[ProjectRecommendation] = []
         general_warnings = [ECONOMIC_COMPATIBILITY_DISCLAIMER]
         for project in projects:
@@ -117,12 +361,32 @@ class RecommendationService:
         top = scored[: max(1, min(limit, 10))]
         for index, item in enumerate(top, start=1):
             item.rank = index
+            item.probability = round(item.compatibility_score / 100.0, 4)
+            if not item.reason and item.matched_factors:
+                item.reason = item.matched_factors[0].message
 
         status = (
             RecommendationStatus.NO_MATCHES
             if not top
             else RecommendationStatus.COMPLETED
         )
+        spoken = None
+        if top:
+            best = top[0]
+            spoken = (
+                f"Según tu perfil, la mejor opción es {best.project_name}"
+                + (f" porque {best.reason}" if best.reason else "")
+            )
+            if best.brochure_url:
+                spoken += f". Aquí tienes el brochure: {best.brochure_url}."
+            if len(top) > 1:
+                extras = []
+                for item in top[1:]:
+                    extras.append(
+                        f"{item.project_name}"
+                        + (f" ({item.reason})" if item.reason else "")
+                    )
+                spoken += " También te pueden interesar: " + "; ".join(extras) + "."
 
         return RecommendationResult(
             lead_id=lead.id,
@@ -137,6 +401,9 @@ class RecommendationService:
             general_warnings=general_warnings,
             disclaimer=RECOMMENDATION_DISCLAIMER,
             generated_at=generated_at,
+            spoken_summary=spoken,
+            engine="deterministic",
+            profile_json_path=profile_path,
         )
 
     def _score_project(self, lead: Lead, project: Project) -> ProjectRecommendation:

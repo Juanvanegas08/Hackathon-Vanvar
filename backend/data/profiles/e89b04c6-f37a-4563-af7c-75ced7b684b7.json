@@ -1,0 +1,61 @@
+{
+  "schema_version": "1.0",
+  "entity": "lead_profile",
+  "lead_id": "e89b04c6-f37a-4563-af7c-75ced7b684b7",
+  "saved_at": "2026-07-23T21:00:35.352872+00:00",
+  "identity": {
+    "document_type": null,
+    "document_number": null,
+    "known_lead": false,
+    "identity_status": "not_checked",
+    "identity_verified": false,
+    "profile_source": null
+  },
+  "contact": {
+    "nombre": "Sin datos",
+    "telefono": null,
+    "correo": null,
+    "canal_origen": "desconocido"
+  },
+  "affiliation": {
+    "afiliado": null,
+    "afiliacion_confirmada": false,
+    "categoria_afiliacion": null,
+    "empresa": null
+  },
+  "financial": {
+    "salario_mensual": null,
+    "ingreso_hogar": null,
+    "ahorro": null,
+    "obligaciones_mensuales": null
+  },
+  "credit": {
+    "situacion_crediticia": null
+  },
+  "household": {
+    "personas_hogar": null,
+    "personas_a_cargo": null,
+    "beneficiarios_registrados": null,
+    "tiene_vivienda": null
+  },
+  "housing_preferences": {
+    "ubicacion_actual": null,
+    "ubicacion_deseada": null,
+    "plazo_compra": null,
+    "proyecto_interes": null
+  },
+  "consent": {
+    "consentimiento": null,
+    "data_consent": null,
+    "data_consent_at": null
+  },
+  "lifecycle": {
+    "estado_lead": "nuevo",
+    "fecha_creacion": "2026-07-23T21:00:35.348350+00:00",
+    "fecha_actualizacion": "2026-07-23T21:00:35.348352+00:00",
+    "demo_mode": false
+  },
+  "field_provenance": {},
+  "prefilled_fields": [],
+  "fields_to_confirm": []
+}
