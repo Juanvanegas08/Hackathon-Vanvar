@@ -1,8 +1,8 @@
 {
   "schema_version": "1.0",
   "entity": "lead_profile",
-  "lead_id": "4e66ccaa-f84b-41ad-a88c-24d7f6464457",
-  "saved_at": "2026-07-23T21:32:09.487818+00:00",
+  "lead_id": "982fd545-c797-42cc-b962-6df863273031",
+  "saved_at": "2026-07-23T21:32:09.426806+00:00",
   "identity": {
     "document_type": null,
     "document_number": null,
@@ -18,13 +18,13 @@
     "canal_origen": "desconocido"
   },
   "affiliation": {
-    "afiliado": null,
+    "afiliado": false,
     "afiliacion_confirmada": false,
     "categoria_afiliacion": null,
     "empresa": null
   },
   "financial": {
-    "salario_mensual": null,
+    "salario_mensual": 2000000.0,
     "ingreso_hogar": null,
     "ahorro": null,
     "obligaciones_mensuales": null
@@ -40,7 +40,7 @@
   },
   "housing_preferences": {
     "ubicacion_actual": null,
-    "ubicacion_deseada": null,
+    "ubicacion_deseada": "Arboleda",
     "plazo_compra": null,
     "proyecto_interes": null
   },
@@ -51,8 +51,8 @@
   },
   "lifecycle": {
     "estado_lead": "nuevo",
-    "fecha_creacion": "2026-07-23T21:32:09.487762+00:00",
-    "fecha_actualizacion": "2026-07-23T21:32:09.487765+00:00",
+    "fecha_creacion": "2026-07-23T21:32:09.426777+00:00",
+    "fecha_actualizacion": "2026-07-23T21:32:09.426779+00:00",
     "demo_mode": false
   },
   "field_provenance": {},

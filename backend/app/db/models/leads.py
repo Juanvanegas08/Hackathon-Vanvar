@@ -178,6 +178,11 @@ class LeadProfile(TimestampMixin, UpdatedAtMixin, Base):
         nullable=False,
         server_default=text("'{}'::jsonb"),
     )
+    profile_document: Mapped[dict[str, Any]] = mapped_column(
+        JSONB,
+        nullable=False,
+        server_default=text("'{}'::jsonb"),
+    )
 
 
 class LeadFieldMetadata(UpdatedAtMixin, Base):

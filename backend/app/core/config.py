@@ -153,6 +153,10 @@ class Settings(BaseSettings):
         default="memory",
         alias="PERSISTENCE_PROVIDER",
     )
+    identity_hash_pepper: str = Field(
+        default="casalista-dev-pepper",
+        alias="IDENTITY_HASH_PEPPER",
+    )
     test_database_url: SecretStr | None = Field(default=None, alias="TEST_DATABASE_URL")
 
     @field_validator("cors_origins", mode="before")

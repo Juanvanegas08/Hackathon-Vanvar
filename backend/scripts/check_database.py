@@ -21,8 +21,8 @@ def main() -> int:
         return 1
 
     print(f"Connecting to: {settings.get_redacted_database_url()}")
-    sync_url = url.replace("postgresql+psycopg://", "postgresql://", 1)
-    engine = create_engine(sync_url)
+    # Keep the psycopg3 driver URL (postgresql+psycopg://...).
+    engine = create_engine(url)
     try:
         with engine.connect() as connection:
             value = connection.execute(text("SELECT 1")).scalar()

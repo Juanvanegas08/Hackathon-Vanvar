@@ -65,6 +65,11 @@ class LeadService:
         updated = self._enrich_category(updated)
         return self._repository.update(updated)
 
+    def save_profile(self, lead_id: UUID) -> Lead:
+        """Persist the current lead profile (Postgres or memory)."""
+        lead = self.get_lead(lead_id)
+        return self._repository.save_profile(lead)
+
     def delete_lead(self, lead_id: UUID) -> None:
         deleted = self._repository.delete(lead_id)
         if not deleted:

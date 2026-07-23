@@ -230,6 +230,12 @@ class VoiceOrchestrationService:
         if spoken_summary:
             closing = f"{closing} {spoken_summary}"
 
+        # Persist completed profile into the configured repository (Postgres when enabled).
+        try:
+            self._leads.save_profile(lead_id)
+        except Exception:  # noqa: BLE001
+            pass
+
         return VoiceCompleteResponse(
             completed=True,
             readiness={

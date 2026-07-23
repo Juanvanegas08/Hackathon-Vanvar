@@ -39,6 +39,26 @@ class IdentityService:
 
     def lookup(self, document_type: str, document_number: str) -> dict[str, Any]:
         """Lookup an identity without creating a lead."""
+        existing = self._repository.get_by_document(document_type, document_number)
+        if existing is not None:
+            profile = self._profile_dict_from_lead(existing)
+            return {
+                "match_status": (
+                    existing.identity_status.value
+                    if hasattr(existing.identity_status, "value")
+                    else str(existing.identity_status)
+                ),
+                "known_lead": True,
+                "identity_verified": bool(existing.identity_verified),
+                "profile_source": "database",
+                "prefilled_profile": profile,
+                "prefilled_fields": list(existing.prefilled_fields)
+                or [key for key, value in profile.items() if value is not None],
+                "fields_to_confirm": list(existing.fields_to_confirm),
+                "consent_required": existing.data_consent is not True,
+                "demo_mode": bool(existing.demo_mode),
+            }
+
         record = self._provider.lookup(document_type, document_number)
         if record is None:
             return {
@@ -74,9 +94,35 @@ class IdentityService:
         document_number: str,
         data_consent: bool,
     ) -> tuple[Lead, dict[str, Any]]:
-        """Create a lead from a mock identity lookup."""
+        """Return existing DB profile by document, or create a new lead."""
         now = datetime.now(UTC)
         doc_type = DocumentType(document_type.upper())
+        existing = self._repository.get_by_document(document_type, document_number)
+        if existing is not None:
+            if data_consent and existing.data_consent is not True:
+                existing = existing.apply_partial_update(
+                    {
+                        "data_consent": True,
+                        "data_consent_at": now,
+                        "consentimiento": True,
+                    }
+                )
+                existing = self._repository.save_profile(existing)
+            context = {
+                "known_lead": True,
+                "identity_status": (
+                    existing.identity_status.value
+                    if hasattr(existing.identity_status, "value")
+                    else str(existing.identity_status)
+                ),
+                "identity_verified": bool(existing.identity_verified),
+                "demo_mode": bool(existing.demo_mode),
+                "profile_source": "database",
+                "created": False,
+                "message": "Perfil recuperado desde la base de datos.",
+            }
+            return existing, context
+
         record = self._provider.lookup(document_type, document_number)
 
         lead = Lead(
@@ -104,6 +150,9 @@ class IdentityService:
                 "identity_status": IdentityStatus.NEW_LEAD.value,
                 "identity_verified": False,
                 "demo_mode": True,
+                "profile_source": "new",
+                "created": True,
+                "message": "No había perfil previo; se creó desde cero.",
             }
             return created, context
 
@@ -122,6 +171,8 @@ class IdentityService:
                 "identity_status": created.identity_status.value,
                 "identity_verified": False,
                 "demo_mode": True,
+                "profile_source": MockAffiliationLookupProvider.SOURCE,
+                "created": True,
                 "warning": "Sin consentimiento no se precargó información financiera.",
             }
             return created, context
@@ -146,6 +197,7 @@ class IdentityService:
             "identity_verified": False,
             "demo_mode": True,
             "profile_source": MockAffiliationLookupProvider.SOURCE,
+            "created": True,
         }
         return created, context
 
@@ -305,3 +357,35 @@ class IdentityService:
         except (InvalidSmmlvError, ValidationBusinessError):
             return lead
         return lead
+
+    @staticmethod
+    def _profile_dict_from_lead(lead: Lead) -> dict[str, Any]:
+        return {
+            "nombre": lead.nombre,
+            "afiliado": lead.afiliado,
+            "telefono": lead.telefono,
+            "correo": str(lead.correo) if lead.correo else None,
+            "empresa": lead.empresa,
+            "salario_mensual": lead.salario_mensual,
+            "ingreso_hogar": lead.ingreso_hogar,
+            "ahorro": lead.ahorro,
+            "obligaciones_mensuales": lead.obligaciones_mensuales,
+            "personas_hogar": lead.personas_hogar,
+            "personas_a_cargo": lead.personas_a_cargo,
+            "beneficiarios_registrados": lead.beneficiarios_registrados,
+            "situacion_crediticia": (
+                lead.situacion_crediticia.value
+                if lead.situacion_crediticia is not None
+                else None
+            ),
+            "ubicacion_deseada": lead.ubicacion_deseada,
+            "plazo_compra": (
+                lead.plazo_compra.value if lead.plazo_compra is not None else None
+            ),
+            "proyecto_interes": lead.proyecto_interes,
+            "categoria_afiliacion": (
+                lead.categoria_afiliacion.value
+                if lead.categoria_afiliacion is not None
+                else None
+            ),
+        }

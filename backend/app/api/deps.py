@@ -6,7 +6,9 @@ from app.core.config import Settings, get_settings
 from app.providers.mock_affiliation_provider import MockAffiliationLookupProvider
 from app.providers.openai_realtime_provider import OpenAIRealtimeProvider
 from app.repositories.json_project_repository import JsonProjectRepository
+from app.repositories.lead_repository import LeadRepository
 from app.repositories.memory_lead_repository import MemoryLeadRepository
+from app.repositories.postgres_lead_repository import PostgresLeadRepository
 from app.services.affiliation_service import AffiliationService
 from app.services.identity_service import IdentityService
 from app.services.lead_service import LeadService
@@ -20,8 +22,14 @@ from app.services.voice_orchestration_service import VoiceOrchestrationService
 
 
 @lru_cache
-def get_lead_repository() -> MemoryLeadRepository:
-    """Return the process-wide in-memory repository instance."""
+def get_lead_repository() -> LeadRepository:
+    """Return the process-wide lead repository (memory or Postgres)."""
+    settings = get_settings()
+    if (
+        settings.persistence_provider == "postgres"
+        and settings.is_database_configured
+    ):
+        return PostgresLeadRepository(settings=settings)
     return MemoryLeadRepository()
 
 
