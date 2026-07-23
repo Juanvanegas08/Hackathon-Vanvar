@@ -81,6 +81,8 @@ class NextQuestion(BaseModel):
     required: bool = True
     reason: str
     confirmation_required: bool = False
+    current_value: object | None = None
+    source: str | None = None
 
 
 class NextQuestionResponse(BaseModel):
@@ -226,7 +228,11 @@ class AdvisorSummaryResponse(BaseModel):
     household: dict[str, int | bool | None]
     readiness: ReadinessSummaryBlock
     gaps: list[str]
-    fields_to_confirm: list[str]
+    fields_to_confirm: list[str] = Field(default_factory=list)
     recommended_projects: list[dict[str, object]] = Field(default_factory=list)
+    recommendation_warning: str | None = None
+    identity_context: dict[str, object] | None = None
+    confirmed_fields: list[str] = Field(default_factory=list)
+    field_sources: dict[str, object] = Field(default_factory=dict)
     next_action: str
     disclaimer: str

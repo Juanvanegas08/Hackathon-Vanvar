@@ -120,6 +120,19 @@ class ReadinessService:
             )
         if not lead.afiliacion_confirmada and lead.afiliado is not None:
             warnings.append("La afiliación aún no está confirmada por un sistema oficial")
+        if lead.fields_to_confirm:
+            warnings.append(
+                "Existen datos precargados pendientes de confirmación por el lead"
+            )
+        if lead.known_lead and not lead.identity_verified:
+            warnings.append(
+                "Identidad no verificada: la coincidencia proviene de una simulación "
+                "y no de autenticación OTP u oficial"
+            )
+        if lead.demo_mode:
+            warnings.append(
+                "Modo demostración: los perfiles de afiliación son completamente ficticios"
+            )
         if (
             lead.salario_mensual is not None
             and lead.ingreso_hogar is not None
@@ -132,7 +145,15 @@ class ReadinessService:
         critical_missing = [field for field in CRITICAL_READINESS_FIELDS if field in missing_fields]
         if critical_missing:
             return ConfidenceLevel.LOW
+        if lead.fields_to_confirm or (lead.known_lead and not lead.identity_verified):
+            return ConfidenceLevel.MEDIUM
         if missing_fields or not lead.afiliacion_confirmada:
+            return ConfidenceLevel.MEDIUM
+        # Inferred sources cannot reach high confidence.
+        inferred = any(
+            meta.source.value == "inferred" for meta in lead.field_metadata.values()
+        )
+        if inferred:
             return ConfidenceLevel.MEDIUM
         return ConfidenceLevel.HIGH
 

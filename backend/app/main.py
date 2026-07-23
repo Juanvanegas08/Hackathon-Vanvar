@@ -12,7 +12,12 @@ from pydantic import ValidationError
 from app.api.router import build_api_router
 from app.api.routes import health
 from app.core.config import get_settings
-from app.core.exceptions import AppError, NotFoundError, ValidationBusinessError
+from app.core.exceptions import (
+    AppError,
+    NotFoundError,
+    RealtimeServiceError,
+    ValidationBusinessError,
+)
 
 
 @asynccontextmanager
@@ -55,6 +60,16 @@ def create_app() -> FastAPI:
 
 def register_exception_handlers(application: FastAPI) -> None:
     """Register centralized exception handlers."""
+
+    @application.exception_handler(RealtimeServiceError)
+    async def realtime_error_handler(
+        _: Request,
+        exc: RealtimeServiceError,
+    ) -> JSONResponse:
+        return JSONResponse(
+            status_code=503,
+            content={"detail": exc.message, "code": exc.code},
+        )
 
     @application.exception_handler(NotFoundError)
     async def not_found_handler(_: Request, exc: NotFoundError) -> JSONResponse:

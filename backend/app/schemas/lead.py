@@ -9,6 +9,10 @@ from app.models.lead import (
     AffiliationCategory,
     CanalOrigen,
     CreditSituation,
+    DataSource,
+    DocumentType,
+    FieldProvenance,
+    IdentityStatus,
     Lead,
     LeadStatus,
     PurchaseTimeline,
@@ -56,6 +60,9 @@ class LeadCreate(BaseModel):
     plazo_compra: PurchaseTimeline | None = None
     proyecto_interes: str | None = None
     estado_lead: LeadStatus = LeadStatus.NUEVO
+    document_type: DocumentType | None = None
+    document_number: str | None = None
+    data_consent: bool | None = None
 
 
 class LeadUpdate(BaseModel):
@@ -96,6 +103,9 @@ class LeadUpdate(BaseModel):
     plazo_compra: PurchaseTimeline | None = None
     proyecto_interes: str | None = None
     estado_lead: LeadStatus | None = None
+    document_type: DocumentType | None = None
+    document_number: str | None = None
+    data_consent: bool | None = None
 
     @field_validator(
         "salario_mensual",
@@ -144,6 +154,19 @@ class LeadResponse(BaseModel):
     estado_lead: LeadStatus
     fecha_creacion: datetime
     fecha_actualizacion: datetime
+    document_type: DocumentType | None = None
+    document_number: str | None = None
+    known_lead: bool = False
+    identity_status: IdentityStatus = IdentityStatus.NOT_CHECKED
+    identity_verified: bool = False
+    profile_source: DataSource | None = None
+    prefilled_fields: list[str] = Field(default_factory=list)
+    fields_to_confirm: list[str] = Field(default_factory=list)
+    identity_lookup_at: datetime | None = None
+    data_consent: bool | None = None
+    data_consent_at: datetime | None = None
+    field_metadata: dict[str, FieldProvenance] = Field(default_factory=dict)
+    demo_mode: bool = False
 
     @classmethod
     def from_lead(cls, lead: Lead) -> "LeadResponse":

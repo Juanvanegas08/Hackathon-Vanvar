@@ -39,3 +39,14 @@ class InvalidSmmlvError(ConfigurationError):
             "SMMLV no está configurado o es inválido. "
             "Configure un valor mayor que cero antes de calcular categorías salariales."
         )
+
+
+class RealtimeServiceError(AppError):
+    """Raised when the realtime voice provider cannot fulfill a request."""
+
+    def __init__(
+        self,
+        message: str = "No fue posible iniciar la conversación de voz.",
+        code: str = "realtime_service_unavailable",
+    ) -> None:
+        super().__init__(message=message, code=code)

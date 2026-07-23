@@ -31,6 +31,47 @@ class Settings(BaseSettings):
         default_factory=lambda: ["http://localhost:5173"],
         alias="CORS_ORIGINS",
     )
+    projects_catalog_path: str = Field(
+        default="./data/processed/projects_catalog.json",
+        alias="PROJECTS_CATALOG_PATH",
+    )
+    project_profiles_path: str = Field(
+        default="./data/processed/project_profiles.json",
+        alias="PROJECT_PROFILES_PATH",
+    )
+    project_aliases_path: str = Field(
+        default="./data/processed/project_aliases.json",
+        alias="PROJECT_ALIASES_PATH",
+    )
+    projects_canonical_path: str = Field(
+        default="./data/processed/projects_canonical.json",
+        alias="PROJECTS_CANONICAL_PATH",
+    )
+    mock_affiliates_path: str = Field(
+        default="./data/mock/mock_affiliates.json",
+        alias="MOCK_AFFILIATES_PATH",
+    )
+    openai_api_key: str | None = Field(default=None, alias="OPENAI_API_KEY")
+    openai_realtime_model: str = Field(
+        default="gpt-realtime-2.1",
+        alias="OPENAI_REALTIME_MODEL",
+    )
+    openai_realtime_voice: str = Field(
+        default="marin",
+        alias="OPENAI_REALTIME_VOICE",
+    )
+    openai_realtime_transcription_model: str = Field(
+        default="gpt-4o-mini-transcribe",
+        alias="OPENAI_REALTIME_TRANSCRIPTION_MODEL",
+    )
+    openai_realtime_enabled: bool = Field(
+        default=True,
+        alias="OPENAI_REALTIME_ENABLED",
+    )
+    openai_request_timeout_seconds: float = Field(
+        default=20,
+        alias="OPENAI_REQUEST_TIMEOUT_SECONDS",
+    )
 
     @field_validator("cors_origins", mode="before")
     @classmethod
@@ -48,6 +89,11 @@ class Settings(BaseSettings):
     def is_smmlv_configured(self) -> bool:
         """Return True when SMMLV can be used for salary category calculations."""
         return self.smmlv > 0
+
+    @property
+    def is_openai_realtime_ready(self) -> bool:
+        """Return True when Realtime voice can be started."""
+        return bool(self.openai_realtime_enabled and self.openai_api_key)
 
 
 @lru_cache

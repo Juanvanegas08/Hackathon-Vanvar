@@ -1,4 +1,4 @@
-"""Project catalog models for future recommendation support."""
+"""Project catalog models for recommendation support."""
 
 from typing import Any
 from uuid import UUID, uuid4
@@ -9,17 +9,31 @@ from pydantic import BaseModel, ConfigDict, Field
 class HistoricalProfile(BaseModel):
     """Aggregated historical buyer profile for a project."""
 
+    total_buyers: int = 0
     affiliated_percentage: float | None = None
+    non_affiliated_percentage: float | None = None
+    category_distribution: dict[str, float] = Field(default_factory=dict)
     salary_range_distribution: dict[str, float] = Field(default_factory=dict)
     segments: dict[str, float] = Field(default_factory=dict)
     dependents_distribution: dict[str, float] = Field(default_factory=dict)
+    dependents_average: float | None = None
+    household_composition_distribution: dict[str, float] = Field(default_factory=dict)
     frequent_locations: list[str] = Field(default_factory=list)
     frequent_financial_entities: list[str] = Field(default_factory=list)
     frequent_companies: list[str] = Field(default_factory=list)
+    enterprise_pyramid_distribution: dict[str, float] = Field(default_factory=dict)
+    historical_price_min: float | None = None
+    historical_price_max: float | None = None
+    historical_price_median: float | None = None
+    historical_price_reliable: bool = False
+    withdrawal_percentage: float | None = None
+    missing_data_percentage: dict[str, float] = Field(default_factory=dict)
+    # Descriptive only; never used for compatibility scoring.
+    age_range_distribution: dict[str, float] = Field(default_factory=dict)
 
 
 class Project(BaseModel):
-    """Housing project entity prepared for a future recommender."""
+    """Housing project entity used by the recommender."""
 
     model_config = ConfigDict(
         json_schema_extra={
@@ -38,6 +52,7 @@ class Project(BaseModel):
                     "recorrido_360_url": None,
                     "disponible": True,
                     "perfil_historico": {
+                        "total_buyers": 120,
                         "affiliated_percentage": 92.5,
                         "salary_range_distribution": {},
                         "segments": {},

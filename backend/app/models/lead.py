@@ -71,6 +71,49 @@ class QuestionFieldType(StrEnum):
     TEXT = "text"
     ENUM = "enum"
     CONSENT = "consent"
+    CONFIRMATION = "confirmation"
+
+
+class DocumentType(StrEnum):
+    """Supported identity document types for the demo."""
+
+    CC = "CC"
+    CE = "CE"
+    PPT = "PPT"
+    OTRO = "OTRO"
+
+
+class IdentityStatus(StrEnum):
+    """Identity resolution status for a lead."""
+
+    NOT_CHECKED = "not_checked"
+    KNOWN_AFFILIATE = "known_affiliate"
+    KNOWN_NON_AFFILIATE = "known_non_affiliate"
+    NEW_LEAD = "new_lead"
+    POSSIBLE_MATCH = "possible_match"
+    IDENTITY_NOT_VERIFIED = "identity_not_verified"
+
+
+class DataSource(StrEnum):
+    """Allowed provenance sources for lead fields."""
+
+    MOCK_AFFILIATION_SERVICE = "mock_affiliation_service"
+    OFFICIAL_SYSTEM = "official_system"
+    EMPLOYER_REPORT = "employer_report"
+    CRM = "crm"
+    HISTORICAL_DATA = "historical_data"
+    USER_DECLARED = "user_declared"
+    INFERRED = "inferred"
+
+
+class FieldProvenance(BaseModel):
+    """Traceability metadata for a single lead field."""
+
+    source: DataSource
+    confirmed: bool = False
+    requires_confirmation: bool = False
+    updated_at: datetime | None = None
+    previous_value: Any | None = None
 
 
 def _utcnow() -> datetime:
@@ -109,6 +152,21 @@ class Lead(BaseModel):
     fecha_creacion: datetime = Field(default_factory=_utcnow)
     fecha_actualizacion: datetime = Field(default_factory=_utcnow)
 
+    # Identity / mock affiliation enrichment (optional, backward compatible).
+    document_type: DocumentType | None = None
+    document_number: str | None = None
+    known_lead: bool = False
+    identity_status: IdentityStatus = IdentityStatus.NOT_CHECKED
+    identity_verified: bool = False
+    profile_source: DataSource | None = None
+    prefilled_fields: list[str] = Field(default_factory=list)
+    fields_to_confirm: list[str] = Field(default_factory=list)
+    identity_lookup_at: datetime | None = None
+    data_consent: bool | None = None
+    data_consent_at: datetime | None = None
+    field_metadata: dict[str, FieldProvenance] = Field(default_factory=dict)
+    demo_mode: bool = False
+
     @field_validator(
         "salario_mensual",
         "ingreso_hogar",
@@ -129,9 +187,27 @@ class Lead(BaseModel):
         return value
 
     def apply_partial_update(self, data: dict[str, Any]) -> "Lead":
-        """Merge non-None fields without clearing previously known valid values."""
+        """Merge fields without clearing previously known valid values.
+
+        Empty lists and False values are allowed when explicitly provided.
+        None values are ignored except for nested metadata merges.
+        """
         updates = {key: value for key, value in data.items() if value is not None}
+        if "field_metadata" in data and data["field_metadata"] is not None:
+            merged_meta = dict(self.field_metadata)
+            incoming = data["field_metadata"]
+            if isinstance(incoming, dict):
+                for key, value in incoming.items():
+                    merged_meta[key] = value
+            updates["field_metadata"] = merged_meta
         if not updates:
             return self
         updates["fecha_actualizacion"] = _utcnow()
         return self.model_copy(update=updates)
+
+    def is_field_confirmed(self, field: str) -> bool:
+        meta = self.field_metadata.get(field)
+        return bool(meta and meta.confirmed)
+
+    def field_requires_confirmation(self, field: str) -> bool:
+        return field in self.fields_to_confirm

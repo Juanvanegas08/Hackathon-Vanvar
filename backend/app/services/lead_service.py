@@ -58,6 +58,13 @@ class LeadService:
         updated = self._enrich_category(updated)
         return self._repository.update(updated)
 
+    def apply_lead_updates(self, lead_id: UUID, updates: dict[str, object]) -> Lead:
+        """Apply a raw partial update dict (including field_metadata)."""
+        lead = self.get_lead(lead_id)
+        updated = lead.apply_partial_update(updates)
+        updated = self._enrich_category(updated)
+        return self._repository.update(updated)
+
     def delete_lead(self, lead_id: UUID) -> None:
         deleted = self._repository.delete(lead_id)
         if not deleted:

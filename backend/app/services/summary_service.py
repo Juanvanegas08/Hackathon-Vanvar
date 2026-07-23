@@ -4,6 +4,7 @@ from app.core.constants import READINESS_DISCLAIMER
 from app.core.exceptions import InvalidSmmlvError, ValidationBusinessError
 from app.models.evaluation import ReadinessResult
 from app.models.lead import AffiliationCategory, Lead
+from app.models.recommendation import RecommendationStatus
 from app.schemas.evaluation import (
     AdvisorSummaryResponse,
     AffiliationSummaryBlock,
@@ -12,6 +13,7 @@ from app.schemas.evaluation import (
 )
 from app.services.affiliation_service import AffiliationService
 from app.services.readiness_service import ReadinessService
+from app.services.recommendation_service import RecommendationService
 
 
 class SummaryService:
@@ -21,9 +23,11 @@ class SummaryService:
         self,
         readiness_service: ReadinessService | None = None,
         affiliation_service: AffiliationService | None = None,
+        recommendation_service: RecommendationService | None = None,
     ) -> None:
         self._readiness = readiness_service or ReadinessService()
         self._affiliation = affiliation_service or AffiliationService()
+        self._recommendation = recommendation_service
 
     def build_summary(
         self,
@@ -43,17 +47,60 @@ class SummaryService:
         except (InvalidSmmlvError, ValidationBusinessError):
             category = lead.categoria_afiliacion
 
-        fields_to_confirm: list[str] = []
-        if lead.afiliado is not None and not lead.afiliacion_confirmada:
+        fields_to_confirm: list[str] = list(lead.fields_to_confirm)
+        if (
+            lead.afiliado is not None
+            and not lead.afiliacion_confirmada
+            and "afiliado" not in fields_to_confirm
+        ):
             fields_to_confirm.append("afiliado")
-        if lead.salario_mensual is not None:
-            fields_to_confirm.append("salario_mensual")
-        if lead.ahorro is not None:
-            fields_to_confirm.append("ahorro")
-        if lead.obligaciones_mensuales is not None:
-            fields_to_confirm.append("obligaciones_mensuales")
-        if lead.situacion_crediticia is not None:
-            fields_to_confirm.append("situacion_crediticia")
+
+        confirmed_fields = [
+            field
+            for field, meta in lead.field_metadata.items()
+            if meta.confirmed
+        ]
+        field_sources: dict[str, object] = {
+            field: {
+                "source": meta.source.value,
+                "confirmed": meta.confirmed,
+                "requires_confirmation": meta.requires_confirmation,
+            }
+            for field, meta in lead.field_metadata.items()
+        }
+
+        recommended_projects: list[dict[str, object]] = []
+        recommendation_warning: str | None = None
+        if self._recommendation is None:
+            recommendation_warning = (
+                "El motor de recomendaciones todavía no tiene perfiles "
+                "de proyectos disponibles."
+            )
+        else:
+            result = self._recommendation.recommend_for_lead(lead, limit=3)
+            if result.recommendation_status == RecommendationStatus.PROFILES_UNAVAILABLE:
+                recommendation_warning = (
+                    "El motor de recomendaciones todavía no tiene perfiles "
+                    "de proyectos disponibles."
+                )
+            elif result.recommendation_status == RecommendationStatus.INSUFFICIENT_INFORMATION:
+                recommendation_warning = (
+                    "Información insuficiente del lead para generar recomendaciones."
+                )
+            else:
+                recommended_projects = [
+                    item.model_dump(mode="json") for item in result.recommended_projects
+                ]
+
+        identity_context: dict[str, object] = {
+            "known_lead": lead.known_lead,
+            "identity_status": lead.identity_status.value,
+            "identity_verified": lead.identity_verified,
+            "profile_source": (
+                lead.profile_source.value if lead.profile_source else None
+            ),
+            "demo_mode": lead.demo_mode,
+        }
 
         return AdvisorSummaryResponse(
             lead_id=lead.id,
@@ -92,13 +139,19 @@ class SummaryService:
             ),
             gaps=evaluation.gaps,
             fields_to_confirm=fields_to_confirm,
-            recommended_projects=[],
+            confirmed_fields=confirmed_fields,
+            field_sources=field_sources,
+            identity_context=identity_context,
+            recommended_projects=recommended_projects,
+            recommendation_warning=recommendation_warning,
             next_action=evaluation.next_action,
             disclaimer=READINESS_DISCLAIMER,
         )
 
     @staticmethod
     def _headline(lead: Lead, evaluation: ReadinessResult) -> str:
+        if lead.known_lead and lead.afiliado is True:
+            return "Lead afiliado conocido con datos precargados"
         if lead.afiliado is True and evaluation.readiness_score >= 75:
             return "Lead afiliado con perfil avanzado"
         if lead.afiliado is True and evaluation.readiness_score >= 45:
