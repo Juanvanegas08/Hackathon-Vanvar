@@ -14,6 +14,7 @@ import json
 import re
 import sys
 import uuid
+import warnings as py_warnings
 from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Any
@@ -35,6 +36,12 @@ from app.utils.normalization import (  # noqa: E402
     scale_housing_value,
     strip_text,
 )
+from app.utils.project_matching import compare_project_names  # noqa: E402
+
+# Short brochure labels that the matcher alone cannot resolve.
+BROCHURE_MANUAL_MATCHES: dict[str, str] = {
+    "reserva de aguayacan": "Agrupacion De Vivienda Reserva De Guayacan",
+}
 
 
 def parse_args() -> argparse.Namespace:
@@ -136,25 +143,57 @@ def infer_semantic_role(normalized_name: str) -> str | None:
 
 
 def convert_dates(series: pd.Series) -> tuple[pd.Series, list[str]]:
-    """Parse dates from hackathon exports (mostly US M/D/YYYY) with a dayfirst fallback."""
-    warnings: list[str] = []
-    # Prefer month-first: values like 2/13/2024 are invalid under dayfirst=True.
-    converted = pd.to_datetime(series, errors="coerce", dayfirst=False)
-    still_missing = series.notna() & converted.isna()
-    if still_missing.any():
-        fallback = pd.to_datetime(series[still_missing], errors="coerce", dayfirst=True)
-        converted = converted.copy()
-        converted.loc[still_missing] = fallback
-    failed = series.notna() & converted.isna()
-    # Si/No flags are expected for FECHA_DESISTIMIENTO in the hackathon CSV.
+    """Parse dates from hackathon exports (mostly US M/D/YYYY) with safe fallbacks."""
+    result_warnings: list[str] = []
+    converted = pd.Series(pd.NaT, index=series.index, dtype="datetime64[ns]")
+
+    # Skip Si/No flags up front so they never hit the date parser.
     flag_mask = series.map(lambda value: normalize_yes_no_flag(value) is not None)
-    real_failures = failed & ~flag_mask
-    failed_count = int(real_failures.sum())
+    candidates = series.where(~flag_mask)
+
+    # Explicit formats first to avoid pandas "Could not infer format" warnings.
+    for fmt in ("%m/%d/%Y", "%d/%m/%Y", "%Y-%m-%d", "%m/%d/%y", "%d/%m/%y"):
+        still_missing = candidates.notna() & converted.isna()
+        if not still_missing.any():
+            break
+        parsed = pd.to_datetime(
+            candidates[still_missing],
+            errors="coerce",
+            format=fmt,
+        )
+        converted.loc[still_missing] = parsed
+
+    still_missing = candidates.notna() & converted.isna()
+    if still_missing.any():
+        with py_warnings.catch_warnings():
+            py_warnings.filterwarnings(
+                "ignore",
+                message="Could not infer format*",
+                category=UserWarning,
+            )
+            # Last resort: month-first then day-first inference.
+            inferred = pd.to_datetime(
+                candidates[still_missing],
+                errors="coerce",
+                dayfirst=False,
+            )
+            converted.loc[still_missing] = inferred
+            still_missing = candidates.notna() & converted.isna()
+            if still_missing.any():
+                inferred_dayfirst = pd.to_datetime(
+                    candidates[still_missing],
+                    errors="coerce",
+                    dayfirst=True,
+                )
+                converted.loc[still_missing] = inferred_dayfirst
+
+    failed = candidates.notna() & converted.isna()
+    failed_count = int(failed.sum())
     if failed_count:
-        warnings.append(
+        result_warnings.append(
             f"Columna '{series.name}': {failed_count} fechas no interpretables"
         )
-    return converted, warnings
+    return converted, result_warnings
 
 
 def _series_to_python_date(value: Any) -> date | None:
@@ -336,6 +375,239 @@ def prepare_buyers(path: Path) -> tuple[pd.DataFrame, dict[str, Any], list[str]]
     return working, meta, warnings
 
 
+def clean_url(value: Any) -> str | None:
+    """Strip whitespace and zero-width chars from brochure/360 URLs."""
+    text = strip_text(value)
+    if text is None:
+        return None
+    cleaned = text.replace("\u200b", "").replace("\ufeff", "").strip()
+    return cleaned or None
+
+
+def split_urls(value: Any) -> list[str]:
+    text = clean_url(value)
+    if text is None:
+        return []
+    parts = re.split(r"[\n\r;]+", text)
+    urls: list[str] = []
+    for part in parts:
+        cleaned = clean_url(part)
+        if cleaned and cleaned.lower().startswith("http"):
+            urls.append(cleaned)
+    return urls
+
+
+def load_brochure_workbook(path: Path) -> tuple[list[dict[str, Any]], list[str]]:
+    """Load multi-sheet brochure workbook (Links brochure + 360)."""
+    warnings: list[str] = []
+    if path.suffix.lower() not in {".xlsx", ".xls", ".xlsm"}:
+        # Single-sheet CSV/fallback via existing tabular loader.
+        df = load_tabular(path)
+        df.columns = [normalize_header(c) for c in df.columns]
+        records = _rows_from_brochure_frame(df, default_kind="brochure")
+        return records, warnings
+
+    workbook = pd.ExcelFile(path)
+    by_project: dict[str, dict[str, Any]] = {}
+
+    def upsert(name: str, **fields: Any) -> None:
+        key = normalize_for_comparison(name) or name
+        current = by_project.get(key) or {
+            "nombre": name,
+            "ubicacion": None,
+            "brochure_url": None,
+            "recorrido_360_url": None,
+            "recorridos_360": [],
+            "status": None,
+            "metadata": {},
+        }
+        for field, value in fields.items():
+            if field == "recorridos_360" and value:
+                merged = list(dict.fromkeys([*(current.get("recorridos_360") or []), *value]))
+                current["recorridos_360"] = merged
+                if not current.get("recorrido_360_url") and merged:
+                    current["recorrido_360_url"] = merged[0]
+            elif field == "metadata" and isinstance(value, dict):
+                current["metadata"] = {**(current.get("metadata") or {}), **value}
+            elif value not in (None, "", []):
+                current[field] = value
+        by_project[key] = current
+
+    sheet_names = {normalize_for_comparison(name) or name: name for name in workbook.sheet_names}
+    brochure_sheet = next(
+        (
+            original
+            for key, original in sheet_names.items()
+            if "brochure" in key or "link" in key
+        ),
+        workbook.sheet_names[0],
+    )
+    tour_sheet = next(
+        (
+            original
+            for key, original in sheet_names.items()
+            if "360" in key or "recorrido" in key or "tour" in key
+        ),
+        None,
+    )
+
+    brochure_df = pd.read_excel(workbook, sheet_name=brochure_sheet)
+    brochure_df.columns = [normalize_header(c) for c in brochure_df.columns]
+    # UBICACIÓN is often filled only on the first row of a group.
+    ubicacion_col = next(
+        (
+            c
+            for c in brochure_df.columns
+            if "ubicacion" in (normalize_for_comparison(c) or "")
+        ),
+        None,
+    )
+    if ubicacion_col:
+        brochure_df[ubicacion_col] = brochure_df[ubicacion_col].ffill()
+
+    for record in _rows_from_brochure_frame(brochure_df, default_kind="brochure"):
+        upsert(
+            record["nombre"],
+            ubicacion=record.get("ubicacion"),
+            brochure_url=record.get("brochure_url"),
+            status=record.get("status"),
+            metadata=record.get("metadata") or {},
+        )
+
+    if tour_sheet:
+        tour_df = pd.read_excel(workbook, sheet_name=tour_sheet)
+        tour_df.columns = [normalize_header(c) for c in tour_df.columns]
+        tour_ubicacion = next(
+            (
+                c
+                for c in tour_df.columns
+                if "ubicacion" in (normalize_for_comparison(c) or "")
+            ),
+            None,
+        )
+        if tour_ubicacion:
+            tour_df[tour_ubicacion] = tour_df[tour_ubicacion].ffill()
+        for record in _rows_from_brochure_frame(tour_df, default_kind="tour"):
+            upsert(
+                record["nombre"],
+                ubicacion=record.get("ubicacion"),
+                recorridos_360=record.get("recorridos_360") or [],
+                recorrido_360_url=record.get("recorrido_360_url"),
+                metadata=record.get("metadata") or {},
+            )
+    else:
+        warnings.append("No se encontró hoja 360 en el Excel de brochures.")
+
+    return list(by_project.values()), warnings
+
+
+def _rows_from_brochure_frame(
+    df: pd.DataFrame,
+    *,
+    default_kind: str,
+) -> list[dict[str, Any]]:
+    name_col = next(
+        (
+            c
+            for c in df.columns
+            if "proyecto" in (normalize_for_comparison(c) or "")
+        ),
+        df.columns[1] if len(df.columns) > 1 else (df.columns[0] if len(df.columns) else None),
+    )
+    ubicacion_col = next(
+        (
+            c
+            for c in df.columns
+            if "ubicacion" in (normalize_for_comparison(c) or "")
+        ),
+        None,
+    )
+    status_col = next(
+        (
+            c
+            for c in df.columns
+            if "status" in (normalize_for_comparison(c) or "")
+            or "estado" in (normalize_for_comparison(c) or "")
+        ),
+        None,
+    )
+    brochure_col = next(
+        (
+            c
+            for c in df.columns
+            if any(
+                token in (normalize_for_comparison(c) or "")
+                for token in ("brochure", "folleto")
+            )
+            or (
+                "link" in (normalize_for_comparison(c) or "")
+                and "360" not in (normalize_for_comparison(c) or "")
+            )
+        ),
+        None,
+    )
+    tour_col = next(
+        (
+            c
+            for c in df.columns
+            if any(
+                token in (normalize_for_comparison(c) or "")
+                for token in ("360", "recorrido", "tour")
+            )
+        ),
+        None,
+    )
+
+    rows: list[dict[str, Any]] = []
+    if name_col is None:
+        return rows
+    for _, row in df.iterrows():
+        name = strip_text(row.get(name_col))
+        if not name:
+            continue
+        if normalize_for_comparison(name) in {"multiproyecto", "revista"}:
+            # Keep as brochure-only extras; they are not housing projects.
+            pass
+        brochure_url = clean_url(row.get(brochure_col)) if brochure_col else None
+        tour_urls = split_urls(row.get(tour_col)) if tour_col else []
+        rows.append(
+            {
+                "nombre": name,
+                "ubicacion": strip_text(row.get(ubicacion_col)) if ubicacion_col else None,
+                "status": strip_text(row.get(status_col)) if status_col else None,
+                "brochure_url": brochure_url if default_kind == "brochure" else None,
+                "recorrido_360_url": tour_urls[0] if tour_urls else None,
+                "recorridos_360": tour_urls,
+                "metadata": {
+                    str(col): strip_text(row.get(col)) for col in df.columns
+                },
+            }
+        )
+    return rows
+
+
+def match_brochure_to_projects(
+    brochure: dict[str, Any],
+    project_names: list[str],
+) -> tuple[str | None, str]:
+    """Return (matched_project_name, kind)."""
+    brochure_name = strip_text(brochure.get("nombre")) or ""
+    normalized = normalize_for_comparison(brochure_name) or ""
+    manual = BROCHURE_MANUAL_MATCHES.get(normalized)
+    if manual:
+        return manual, "manual"
+
+    best: tuple[float, str, str] | None = None
+    for project_name in project_names:
+        decision = compare_project_names(brochure_name, project_name)
+        if decision.kind in {"exact", "approximate"}:
+            if best is None or decision.score > best[0]:
+                best = (decision.score, decision.kind, project_name)
+    if best is None:
+        return None, "unmatched"
+    return best[2], best[1]
+
+
 def prepare_projects(
     buyers_df: pd.DataFrame,
     buyers_meta: dict[str, Any],
@@ -345,63 +617,13 @@ def prepare_projects(
     semantic_map: dict[str, str] = buyers_meta.get("semantic_map", {})
     project_col = semantic_map.get("proyecto")
 
-    brochure_by_name: dict[str, dict[str, Any]] = {}
+    brochure_records: list[dict[str, Any]] = []
     if brochures_path is not None:
         if not brochures_path.exists():
             warnings.append(f"Brochures no encontrado: {brochures_path}")
         else:
-            brochure_df = load_tabular(brochures_path)
-            brochure_df.columns = [normalize_header(c) for c in brochure_df.columns]
-            name_col = next(
-                (
-                    c
-                    for c in brochure_df.columns
-                    if infer_semantic_role(normalize_for_comparison(c) or "")
-                    in {"proyecto", None}
-                    and "proyecto" in (normalize_for_comparison(c) or "")
-                ),
-                brochure_df.columns[0] if len(brochure_df.columns) else None,
-            )
-            url_col = next(
-                (
-                    c
-                    for c in brochure_df.columns
-                    if any(
-                        token in (normalize_for_comparison(c) or "")
-                        for token in ("url", "link", "brochure", "folleto", "http")
-                    )
-                ),
-                None,
-            )
-            tour_col = next(
-                (
-                    c
-                    for c in brochure_df.columns
-                    if any(
-                        token in (normalize_for_comparison(c) or "")
-                        for token in ("360", "recorrido", "tour")
-                    )
-                ),
-                None,
-            )
-            if name_col is None:
-                warnings.append("No se pudo identificar columna de proyecto en brochures")
-            else:
-                for _, row in brochure_df.iterrows():
-                    name = strip_text(row.get(name_col))
-                    if not name:
-                        continue
-                    key = normalize_for_comparison(name) or name
-                    brochure_by_name[key] = {
-                        "nombre": name,
-                        "brochure_url": strip_text(row.get(url_col)) if url_col else None,
-                        "recorrido_360_url": (
-                            strip_text(row.get(tour_col)) if tour_col else None
-                        ),
-                        "metadata": {
-                            str(col): strip_text(row.get(col)) for col in brochure_df.columns
-                        },
-                    }
+            brochure_records, brochure_warnings = load_brochure_workbook(brochures_path)
+            warnings.extend(brochure_warnings)
 
     projects: dict[str, dict[str, Any]] = {}
 
@@ -458,7 +680,6 @@ def prepare_projects(
                     valor_min = float(numeric.min())
                     valor_max = float(numeric.max())
 
-            brochure = brochure_by_name.get(key, {})
             etapa_values = top_values(group, "etapa", 1)
             ubicacion_values = top_values(group, "ubicacion", 1)
             municipio_values = top_values(group, "municipio", 1)
@@ -473,8 +694,9 @@ def prepare_projects(
                 "departamento": departamento_values[0] if departamento_values else None,
                 "valor_minimo": valor_min,
                 "valor_maximo": valor_max,
-                "brochure_url": brochure.get("brochure_url"),
-                "recorrido_360_url": brochure.get("recorrido_360_url"),
+                "brochure_url": None,
+                "recorrido_360_url": None,
+                "recorridos_360": [],
                 "disponible": True,
                 "perfil_historico": {
                     "affiliated_percentage": affiliated,
@@ -496,34 +718,79 @@ def prepare_projects(
             "el catálogo se armará solo con brochures si existen."
         )
 
-    # Include brochure-only projects.
-    for key, brochure in brochure_by_name.items():
-        if key in projects:
+    # Attach brochures/360/ubicación onto historical projects by name match.
+    history_names = [item["nombre"] for item in projects.values()]
+    matched = 0
+    unmatched: list[str] = []
+    for brochure in brochure_records:
+        brochure_name = strip_text(brochure.get("nombre")) or ""
+        target_name, kind = match_brochure_to_projects(brochure, history_names)
+        if target_name is None:
+            key = normalize_for_comparison(brochure_name) or brochure_name
+            if key in {"multiproyecto", "revista"}:
+                projects[key] = {
+                    "id": str(uuid.uuid4()),
+                    "nombre": brochure_name,
+                    "codigo": None,
+                    "etapa": None,
+                    "ubicacion": brochure.get("ubicacion"),
+                    "municipio": brochure.get("ubicacion"),
+                    "departamento": None,
+                    "valor_minimo": None,
+                    "valor_maximo": None,
+                    "brochure_url": brochure.get("brochure_url"),
+                    "recorrido_360_url": brochure.get("recorrido_360_url"),
+                    "recorridos_360": brochure.get("recorridos_360") or [],
+                    "disponible": True,
+                    "perfil_historico": {
+                        "affiliated_percentage": None,
+                        "salary_range_distribution": {},
+                        "segments": {},
+                        "dependents_distribution": {},
+                        "frequent_locations": [],
+                        "frequent_financial_entities": [],
+                        "frequent_companies": [],
+                    },
+                    "metadata": {
+                        **(brochure.get("metadata") or {}),
+                        "source": "brochure_extra",
+                        "brochure_alias": brochure_name,
+                    },
+                }
+            else:
+                unmatched.append(brochure_name)
             continue
-        projects[key] = {
-            "id": str(uuid.uuid4()),
-            "nombre": brochure["nombre"],
-            "codigo": None,
-            "etapa": None,
-            "ubicacion": None,
-            "municipio": None,
-            "departamento": None,
-            "valor_minimo": None,
-            "valor_maximo": None,
-            "brochure_url": brochure.get("brochure_url"),
-            "recorrido_360_url": brochure.get("recorrido_360_url"),
-            "disponible": True,
-            "perfil_historico": {
-                "affiliated_percentage": None,
-                "salary_range_distribution": {},
-                "segments": {},
-                "dependents_distribution": {},
-                "frequent_locations": [],
-                "frequent_financial_entities": [],
-                "frequent_companies": [],
-            },
-            "metadata": brochure.get("metadata", {}),
+
+        target_key = normalize_for_comparison(target_name) or target_name
+        project = projects[target_key]
+        project["brochure_url"] = brochure.get("brochure_url") or project.get("brochure_url")
+        project["recorrido_360_url"] = (
+            brochure.get("recorrido_360_url") or project.get("recorrido_360_url")
+        )
+        project["recorridos_360"] = list(
+            dict.fromkeys(
+                [
+                    *(project.get("recorridos_360") or []),
+                    *(brochure.get("recorridos_360") or []),
+                ]
+            )
+        )
+        if brochure.get("ubicacion"):
+            project["ubicacion"] = brochure["ubicacion"]
+            project["municipio"] = brochure["ubicacion"]
+        project["metadata"] = {
+            **(project.get("metadata") or {}),
+            "brochure_alias": brochure_name,
+            "brochure_match_kind": kind,
+            "brochure_status": brochure.get("status"),
         }
+        matched += 1
+
+    if brochure_records:
+        warnings.append(
+            f"Brochures emparejados: {matched}/{len(brochure_records)}. "
+            f"Sin match: {unmatched or 'ninguno'}."
+        )
 
     return list(projects.values()), warnings
 

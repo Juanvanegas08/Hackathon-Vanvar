@@ -36,6 +36,7 @@ data/raw/*
 !data/raw/.gitkeep
 data/processed/*
 !data/processed/.gitkeep
+data/mock/processed_demo/
 
 # Local dumps
 *.log

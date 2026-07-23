@@ -110,6 +110,13 @@ PROJECTS_CANONICAL_PATH=./data/processed/projects_canonical.json
 MOCK_AFFILIATES_PATH=./data/mock/mock_affiliates.json
 ```
 
+Mock de compradores históricos (mismo esquema del CSV del reto, datos ficticios):
+
+```bash
+python scripts/generate_mock_buyers.py
+python scripts/prepare_data.py --buyers data/mock/mock_buyers.csv --brochures "docs/Links brochures .xlsx"
+```
+
 Importante: configura `SMMLV` con el salario mínimo vigente antes de calcular categorías A/B/C. Si `SMMLV <= 0`, el cálculo salarial se bloquea con un error controlado. La categoría D (no afiliado) no requiere SMMLV.
 
 ## Ejecución de la API
@@ -500,6 +507,16 @@ Carga en PostgreSQL:
 - `ingestion.seed_executions` (idempotencia por checksum)
 
 Defaults de rutas: `data/processed/buyers_seed.json`, `projects_catalog.json`, `project_profiles.json`.
+
+### Brochures / 360
+
+```bash
+python scripts/prepare_data.py --buyers "docs/....csv" --brochures "docs/Links brochures .xlsx"
+python scripts/seed_brochure_assets.py --dry-run
+python scripts/seed_brochure_assets.py
+```
+
+Actualiza `project_assets` (brochure + tour_360), `project_locations` y `project_aliases` emparejando por nombre (no requiere `--force` del seed histórico).
 
 ### Recuperación de errores comunes
 
