@@ -155,13 +155,27 @@ python scripts/inspect_data.py --buyers "RUTA_ARCHIVO" --brochures "RUTA_ARCHIVO
 python scripts/prepare_data.py --buyers "RUTA_ARCHIVO" --brochures "RUTA_ARCHIVO"
 ```
 
+Acepta Excel (`.xlsx`) o CSV. Para el export del hackathon:
+
+```bash
+python scripts/prepare_data.py --buyers "docs/hackathon_VIVIENDAv2.xlsx - CV_SSS_VIV_PENETRACION_PERFIL_C.csv"
+```
+
 Salidas en `data/processed/`:
 
 - `buyers_clean.csv`
 - `buyers_clean.json`
+- `buyers_seed.json` (listo para `ingestion.normalized_buyer_records`)
 - `projects_catalog.json`
 - `data_quality_report.json`
 - `column_mapping.json`
+
+Normalizaciones específicas del export:
+
+- Afiliación inferida desde `PERIODO_AFILIADO` (vacío = no afiliado)
+- `FECHA_DESISTIMIENTO` como `Si`/`No` → `desistio_normalizado`
+- `VLR_VIVIENDA` escalado `/10000` por formato de exportación
+- `CATEGORIA` / `SEGMENTO_POBLACIONAL` ofuscados se conservan en `normalized_data` (no se fuerzan a A/B/C/D)
 
 Nota: la base histórica contiene principalmente compradores y desistimientos. No representa todos los leads que nunca compraron y no debe usarse como predicción directa de conversión.
 
@@ -463,9 +477,29 @@ Ver [`ops/postgres/roles_and_grants.sql.example`](ops/postgres/roles_and_grants.
 - No hay cifrado real de PII (solo columnas preparadas).
 - En Windows, Alembic/psycopg async usa `SelectorEventLoop`.
 
-### Próxima fase
+### Seeds / carga histórica
 
-Normalización histórica, seeds y (después) repositorios PostgreSQL detrás de `PERSISTENCE_PROVIDER`.
+Tras `prepare_data` y `build_project_profiles`:
+
+```bash
+python scripts/seed_historical_data.py --dry-run
+python scripts/seed_historical_data.py
+```
+
+Reemplazar un seed previo:
+
+```bash
+python scripts/seed_historical_data.py --force
+```
+
+Carga en PostgreSQL:
+
+- `housing.projects` (+ etapas, precios, assets)
+- `ingestion.import_batches` + `normalized_buyer_records`
+- `housing.project_historical_profiles` + `project_profile_distributions`
+- `ingestion.seed_executions` (idempotencia por checksum)
+
+Defaults de rutas: `data/processed/buyers_seed.json`, `projects_catalog.json`, `project_profiles.json`.
 
 ### Recuperación de errores comunes
 
