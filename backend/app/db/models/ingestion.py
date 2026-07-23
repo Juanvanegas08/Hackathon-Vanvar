@@ -25,10 +25,11 @@ from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base, TimestampMixin, UpdatedAtMixin, UUIDPrimaryKeyMixin
-from app.db.schemas import HOUSING_SCHEMA, INGESTION_SCHEMA
+from app.db.schemas import HOUSING_SCHEMA, IDENTITY_SCHEMA, INGESTION_SCHEMA
 
 _BATCH_FK = f"{INGESTION_SCHEMA}.import_batches.id"
 _PROJECT_FK = f"{HOUSING_SCHEMA}.projects.id"
+_PERSON_FK = f"{IDENTITY_SCHEMA}.persons.id"
 
 
 class ImportBatch(UUIDPrimaryKeyMixin, TimestampMixin, Base):
@@ -128,6 +129,7 @@ class NormalizedBuyerRecord(UUIDPrimaryKeyMixin, TimestampMixin, Base):
             "affiliation_category IS NULL OR affiliation_category IN ('A','B','C','D')",
             name="affiliation_category",
         ),
+        Index("ix_ingestion_normalized_buyer_records_person_id", "person_id"),
         {"schema": INGESTION_SCHEMA},
     )
 
@@ -137,6 +139,10 @@ class NormalizedBuyerRecord(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         nullable=False,
     )
     row_number: Mapped[int] = mapped_column(Integer, nullable=False)
+    person_id: Mapped[UUID | None] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey(_PERSON_FK, ondelete="SET NULL"),
+    )
     historical_project_id: Mapped[UUID | None] = mapped_column(
         PG_UUID(as_uuid=True),
         ForeignKey(_PROJECT_FK, ondelete="SET NULL"),

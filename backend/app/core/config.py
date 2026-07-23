@@ -88,6 +88,10 @@ class Settings(BaseSettings):
         default="./data/mock/mock_affiliates.json",
         alias="MOCK_AFFILIATES_PATH",
     )
+    mock_affiliates_historical_path: str = Field(
+        default="./data/mock/mock_affiliates_historical.json",
+        alias="MOCK_AFFILIATES_HISTORICAL_PATH",
+    )
     openai_api_key: str | None = Field(default=None, alias="OPENAI_API_KEY")
     openai_realtime_model: str = Field(
         default="gpt-realtime-2.1",

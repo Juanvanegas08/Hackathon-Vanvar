@@ -37,6 +37,7 @@ data/raw/*
 data/processed/*
 !data/processed/.gitkeep
 data/mock/processed_demo/
+data/mock/mock_affiliates_historical.json
 
 # Local dumps
 *.log
