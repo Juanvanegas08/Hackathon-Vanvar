@@ -26,15 +26,15 @@ Incluye:
 
 No incluye todavía:
 
-- OpenAI / agente de voz
-- Twilio
-- Frontend
+- Seeds / importación Excel (fase siguiente)
+- Sustitución definitiva de repositorios en memoria
 - CRM, DataCrédito o sistemas reales de afiliación
 - Autenticación real por OTP
 - Aprobación de créditos
 - Envío de correos o WhatsApp
 - Modelos predictivos / redes neuronales
-- PostgreSQL / Supabase
+- Twilio (pendiente)
+
 
 ## Tecnologías
 
@@ -42,6 +42,7 @@ No incluye todavía:
 - FastAPI
 - Pydantic v2
 - Uvicorn
+- SQLAlchemy 2.x (async) + Alembic + Psycopg 3
 - Pandas + OpenPyXL
 - python-dotenv + pydantic-settings
 - Pytest
@@ -325,11 +326,163 @@ El agente no puede modificar campos arbitrarios: el backend valida el campo espe
 - Costos variables según uso de OpenAI.
 - Si `OPENAI_API_KEY` falta o Realtime está deshabilitado, el frontend puede continuar en modo mock/texto.
 
+## Persistencia PostgreSQL (infraestructura)
+
+Esta fase agrega la infraestructura de base de datos **sin** sustituir todavía los repositorios en memoria (`PERSISTENCE_PROVIDER=memory`).
+
+### Arquitectura de schemas
+
+```text
+core | identity | affiliation | leads | housing
+qualification | recommendations | conversations
+commercial | ingestion | audit | analytics
+```
+
+Relaciones principales (texto):
+
+```text
+identity.persons
+  └── leads.leads
+        ├── leads.lead_profiles (1:1)
+        ├── qualification.assessments
+        ├── recommendations.recommendation_runs
+        └── conversations.conversation_sessions
+
+housing.projects
+  └── recommendations.recommendation_items
+
+ingestion.import_batches
+  └── housing.project_historical_profiles.source_batch_id
+```
+
+### Dependencias nuevas
+
+```text
+SQLAlchemy>=2.0,<2.1
+alembic>=1.18,<2
+psycopg[binary]>=3.2,<4
+```
+
+### Variables de entorno
+
+```env
+DATABASE_ENABLED=true
+DATABASE_URL=postgresql+psycopg://USER:PASSWORD@HOST:5432/home_30x
+DATABASE_ADMIN_URL=
+DATABASE_NAME=home_30x
+DATABASE_ECHO=false
+PERSISTENCE_PROVIDER=memory
+TEST_DATABASE_URL=
+```
+
+Reglas:
+
+- `DATABASE_URL` la usan SQLAlchemy y Alembic.
+- `DATABASE_ADMIN_URL` solo para crear la base (opcional).
+- `PERSISTENCE_PROVIDER=memory` mantiene la API actual en memoria.
+- Las pruebas destructivas usan únicamente `TEST_DATABASE_URL`.
+
+### Permisos requeridos en `home_30x`
+
+El usuario de migraciones necesita `CREATE` en la base (hoy `home_30x` es owned by `postgres`).
+
+Como rol `postgres` / owner:
+
+```sql
+GRANT CONNECT, CREATE ON DATABASE home_30x TO vanvar_plane_dev_user;
+-- preferible en hackathon:
+-- ALTER DATABASE home_30x OWNER TO vanvar_plane_dev_user;
+```
+
+Ver también [`ops/postgres/grant_migrator_on_home_30x.sql.example`](ops/postgres/grant_migrator_on_home_30x.sql.example).
+
+### Crear la base (opcional)
+
+PowerShell:
+
+```powershell
+cd backend
+python scripts/bootstrap_database.py --check-only
+```
+
+Linux/macOS:
+
+```bash
+cd backend
+python scripts/bootstrap_database.py --check-only
+```
+
+### Migraciones
+
+```powershell
+cd backend
+python -m alembic upgrade head
+python -m alembic current --check-heads
+python -m alembic check
+python scripts/verify_migrations.py
+```
+
+Downgrade:
+
+```powershell
+python -m alembic downgrade -1
+python -m alembic downgrade base
+```
+
+Futuras migraciones:
+
+```powershell
+python -m alembic revision --autogenerate -m "description"
+python -m alembic upgrade head
+```
+
+### Health checks
+
+| Método | Ruta | Descripción |
+|--------|------|-------------|
+| GET | `/health` | Salud del servicio (no depende de PostgreSQL) |
+| GET | `/health/database` | Conexión, Alembic head, schemas y extensiones |
+
+### Convenciones
+
+- Tablas/columnas en `snake_case`, schemas explícitos (nunca `public` para negocio).
+- UUID nativo + `gen_random_uuid()`.
+- Dinero en `NUMERIC(14,2)` (nunca `FLOAT`).
+- JSONB solo para metadata flexible.
+- Identificadores sensibles: hash + ciphertext (sin texto plano).
+- Constraints e índices con nombre.
+
+### Roles (ejemplo)
+
+Ver [`ops/postgres/roles_and_grants.sql.example`](ops/postgres/roles_and_grants.sql.example). No se ejecuta automáticamente.
+
+### Limitaciones de esta fase
+
+- Los leads de la API siguen en memoria.
+- No hay seeds ni importación Excel.
+- No hay cifrado real de PII (solo columnas preparadas).
+- En Windows, Alembic/psycopg async usa `SelectorEventLoop`.
+
+### Próxima fase
+
+Normalización histórica, seeds y (después) repositorios PostgreSQL detrás de `PERSISTENCE_PROVIDER`.
+
+### Recuperación de errores comunes
+
+| Error | Acción |
+|-------|--------|
+| `permission denied for database` | Otorgar `CREATE` o ownership sobre `home_30x` |
+| extensión no crea | Crear `pgcrypto/citext/unaccent/pg_trgm` como superuser |
+| `TEST_DATABASE_URL` vacío | Las pruebas de migración se omiten a propósito |
+| ProactorEventLoop (Windows) | Usar el `env.py` del repo (ya ajustado) |
+
 ## Endpoints principales
+
 
 | Método | Ruta | Descripción |
 |--------|------|-------------|
 | GET | `/health` | Salud del servicio |
+| GET | `/health/database` | Salud de PostgreSQL (degraded si no hay permisos/migraciones) |
 | POST | `/api/v1/leads` | Crear lead |
 | POST | `/api/v1/leads/from-identity` | Crear lead desde identidad simulada |
 | POST | `/api/v1/leads/{id}/confirm-prefilled-data` | Confirmar/corregir precarga |
@@ -395,7 +548,7 @@ curl -X POST http://localhost:8000/api/v1/leads/{LEAD_ID}/confirm-prefilled-data
 
 ## Limitaciones actuales
 
-- Persistencia solo en memoria (se pierde al reiniciar)
+- Persistencia operativa de leads todavía en memoria (`PERSISTENCE_PROVIDER=memory`); la estructura PostgreSQL ya existe
 - La afiliación conocida es **simulada**; no consulta sistemas reales de Colsubsidio
 - Sin OTP ni verificación real de identidad
 - Sin integración real de buró de crédito
@@ -403,13 +556,13 @@ curl -X POST http://localhost:8000/api/v1/leads/{LEAD_ID}/confirm-prefilled-data
 - El catálogo actual no trae municipio/departamento/ubicación confiables
 - Los precios históricos (`VLR_VIVIENDA`) tienen escala no confiable y no se usan para excluir proyectos
 - La restricción comercial 90/10 está modelada como contexto regulatorio, sin contador real de ventas
-- No hay agente de voz ni frontend
+- Sin seeds ni carga Excel todavía
 
 ## Próximos pasos
 
-1. Enriquecer ubicación/precios confiables del catálogo
-2. Persistencia en PostgreSQL / Supabase
-3. Sustituir el mock de afiliación por integración autorizada
-4. Agente de voz conversacional
+1. Otorgar permisos de migrador sobre `home_30x` y aplicar `alembic upgrade head`
+2. Seeds + normalización histórica
+3. Repositorios PostgreSQL detrás de `PERSISTENCE_PROVIDER`
+4. Sustituir el mock de afiliación por integración autorizada
 5. Integración Twilio
 6. Autenticación/OTP para verificación de identidad

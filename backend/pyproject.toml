@@ -11,6 +11,9 @@ dependencies = [
   "python-dotenv>=1.0.1",
   "pandas>=2.2.0",
   "openpyxl>=3.1.5",
+  "SQLAlchemy>=2.0,<2.1",
+  "alembic>=1.18,<2",
+  "psycopg[binary]>=3.2,<4",
 ]
 
 [project.optional-dependencies]
@@ -20,6 +23,7 @@ dev = [
   "ruff>=0.8.0",
   "mypy>=1.13.0",
   "pandas-stubs>=2.2.0",
+  "types-openpyxl>=3.1.5",
 ]
 
 [tool.ruff]
@@ -35,7 +39,7 @@ ignore = ["B008"]
 "scripts/*" = ["E402"]
 
 [tool.mypy]
-python_version = "3.11"
+python_version = "3.12"
 strict = true
 warn_return_any = true
 warn_unused_configs = true
@@ -43,6 +47,10 @@ disallow_untyped_defs = true
 packages = ["app"]
 mypy_path = "."
 explicit_package_bases = true
+
+[[tool.mypy.overrides]]
+module = ["alembic.*", "psycopg.*"]
+ignore_missing_imports = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
