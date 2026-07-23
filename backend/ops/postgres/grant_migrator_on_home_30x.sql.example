@@ -1,0 +1,23 @@
+-- Run as postgres (or database owner) against home_30x.
+-- Grants required for vanvar_plane_dev_user to run Alembic migrations.
+
+-- 1) Allow schema/object creation inside the database
+GRANT CONNECT, CREATE ON DATABASE home_30x TO vanvar_plane_dev_user;
+
+-- 2) Preferred for hackathon: transfer ownership so migrations and extensions work
+-- ALTER DATABASE home_30x OWNER TO vanvar_plane_dev_user;
+
+-- 3) If ownership is not transferred, pre-create extensions as superuser:
+-- \c home_30x
+-- CREATE EXTENSION IF NOT EXISTS pgcrypto;
+-- CREATE EXTENSION IF NOT EXISTS citext;
+-- CREATE EXTENSION IF NOT EXISTS unaccent;
+-- CREATE EXTENSION IF NOT EXISTS pg_trgm;
+-- GRANT CREATE ON SCHEMA public TO vanvar_plane_dev_user;
+
+-- 4) After schemas are created by migrations, grant usage if needed:
+-- GRANT USAGE ON SCHEMA core, identity, affiliation, leads, housing,
+--   qualification, recommendations, conversations, commercial, ingestion,
+--   audit, analytics TO vanvar_plane_dev_user;
+-- GRANT ALL ON ALL TABLES IN SCHEMA core TO vanvar_plane_dev_user;
+-- (Repeat for other schemas as needed.)

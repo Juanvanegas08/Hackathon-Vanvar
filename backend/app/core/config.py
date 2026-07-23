@@ -1,10 +1,47 @@
 """Application settings loaded from environment variables."""
 
 from functools import lru_cache
-from typing import Annotated
+from typing import Annotated, Any, Literal
+from urllib.parse import urlparse, urlunparse
 
-from pydantic import Field, field_validator
+from pydantic import Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
+
+FORBIDDEN_PRODUCTION_DB_NAMES = frozenset({"postgres", "template0", "template1"})
+PersistenceProvider = Literal["memory", "postgres"]
+
+
+def redact_database_url(url: str) -> str:
+    """Return a database URL with the password replaced by ***.
+
+    Uses urllib.parse so passwords with special characters are handled safely.
+    """
+    if not url:
+        return ""
+    parsed = urlparse(url)
+    if parsed.password is None:
+        return url
+    username = parsed.username or ""
+    hostname = parsed.hostname or ""
+    port = f":{parsed.port}" if parsed.port else ""
+    netloc = f"{username}:***@{hostname}{port}"
+    return urlunparse(
+        (parsed.scheme, netloc, parsed.path, parsed.params, parsed.query, parsed.fragment)
+    )
+
+
+def _validate_postgres_url(url: str, field_name: str) -> str:
+    parsed = urlparse(url)
+    scheme = (parsed.scheme or "").lower()
+    if scheme not in {"postgresql", "postgresql+psycopg"}:
+        raise ValueError(
+            f"{field_name} must use postgresql+psycopg:// (or postgresql://) scheme"
+        )
+    if not parsed.hostname:
+        raise ValueError(f"{field_name} must include a hostname")
+    if not parsed.path or parsed.path == "/":
+        raise ValueError(f"{field_name} must include a database name")
+    return url
 
 
 class Settings(BaseSettings):
@@ -89,6 +126,35 @@ class Settings(BaseSettings):
         alias="PREFER_OPENAI_RECOMMENDATIONS",
     )
 
+    database_enabled: bool = Field(default=False, alias="DATABASE_ENABLED")
+    database_url: SecretStr | None = Field(default=None, alias="DATABASE_URL")
+    database_admin_url: SecretStr | None = Field(default=None, alias="DATABASE_ADMIN_URL")
+    database_name: str = Field(default="home_30x", alias="DATABASE_NAME")
+    database_echo: bool = Field(default=False, alias="DATABASE_ECHO")
+    database_pool_size: int = Field(default=10, alias="DATABASE_POOL_SIZE")
+    database_max_overflow: int = Field(default=20, alias="DATABASE_MAX_OVERFLOW")
+    database_pool_timeout_seconds: int = Field(
+        default=30,
+        alias="DATABASE_POOL_TIMEOUT_SECONDS",
+    )
+    database_pool_recycle_seconds: int = Field(
+        default=1800,
+        alias="DATABASE_POOL_RECYCLE_SECONDS",
+    )
+    database_command_timeout_seconds: int = Field(
+        default=30,
+        alias="DATABASE_COMMAND_TIMEOUT_SECONDS",
+    )
+    database_migration_lock_id: int = Field(
+        default=741852963,
+        alias="DATABASE_MIGRATION_LOCK_ID",
+    )
+    persistence_provider: PersistenceProvider = Field(
+        default="memory",
+        alias="PERSISTENCE_PROVIDER",
+    )
+    test_database_url: SecretStr | None = Field(default=None, alias="TEST_DATABASE_URL")
+
     @field_validator("cors_origins", mode="before")
     @classmethod
     def parse_cors_origins(cls, value: object) -> list[str]:
@@ -101,6 +167,38 @@ class Settings(BaseSettings):
             return [part.strip() for part in value.split(",") if part.strip()]
         raise TypeError("CORS_ORIGINS must be a string or list of strings")
 
+    @field_validator("database_url", "database_admin_url", "test_database_url", mode="before")
+    @classmethod
+    def empty_url_as_none(cls, value: object) -> object:
+        if value is None or value == "":
+            return None
+        return value
+
+    @field_validator("database_url", "database_admin_url", "test_database_url", mode="after")
+    @classmethod
+    def validate_postgres_urls(cls, value: SecretStr | None, info: Any) -> SecretStr | None:
+        if value is None:
+            return None
+        _validate_postgres_url(value.get_secret_value(), info.field_name or "database_url")
+        return value
+
+    @model_validator(mode="after")
+    def validate_production_database_name(self) -> "Settings":
+        if self.app_env.lower() == "production":
+            name = self.database_name.strip().lower()
+            if name in FORBIDDEN_PRODUCTION_DB_NAMES:
+                raise ValueError(
+                    f"DATABASE_NAME '{self.database_name}' is forbidden in production"
+                )
+            if self.database_url is not None:
+                path = urlparse(self.database_url.get_secret_value()).path.lstrip("/")
+                db_from_url = path.split("/")[0].lower() if path else ""
+                if db_from_url in FORBIDDEN_PRODUCTION_DB_NAMES:
+                    raise ValueError(
+                        f"DATABASE_URL targets forbidden production database '{db_from_url}'"
+                    )
+        return self
+
     @property
     def is_smmlv_configured(self) -> bool:
         """Return True when SMMLV can be used for salary category calculations."""
@@ -110,6 +208,45 @@ class Settings(BaseSettings):
     def is_openai_realtime_ready(self) -> bool:
         """Return True when Realtime voice can be started."""
         return bool(self.openai_realtime_enabled and self.openai_api_key)
+
+    @property
+    def is_database_configured(self) -> bool:
+        """Return True when PostgreSQL is enabled and a URL is present."""
+        return bool(self.database_enabled and self.database_url is not None)
+
+    def get_database_url(self) -> str | None:
+        """Return the raw DATABASE_URL value when configured."""
+        if self.database_url is None:
+            return None
+        return self.database_url.get_secret_value()
+
+    def get_database_admin_url(self) -> str | None:
+        """Return the raw DATABASE_ADMIN_URL value when configured."""
+        if self.database_admin_url is None:
+            return None
+        return self.database_admin_url.get_secret_value()
+
+    def get_test_database_url(self) -> str | None:
+        """Return the raw TEST_DATABASE_URL value when configured."""
+        if self.test_database_url is None:
+            return None
+        return self.test_database_url.get_secret_value()
+
+    def get_redacted_database_url(self) -> str | None:
+        """Return DATABASE_URL with password redacted."""
+        url = self.get_database_url()
+        if url is None:
+            return None
+        return redact_database_url(url)
+
+    def __repr__(self) -> str:
+        redacted = self.get_redacted_database_url() or ""
+        return (
+            f"Settings(app_env={self.app_env!r}, "
+            f"database_enabled={self.database_enabled}, "
+            f"database_url={redacted!r}, "
+            f"persistence_provider={self.persistence_provider!r})"
+        )
 
 
 @lru_cache

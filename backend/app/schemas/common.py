@@ -1,5 +1,7 @@
 """Shared API schemas."""
 
+from typing import Any
+
 from pydantic import BaseModel, ConfigDict, Field
 
 
@@ -14,6 +16,13 @@ class HealthResponse(BaseModel):
 
     status: str = Field(examples=["ok"])
     service: str = Field(examples=["CasaLista Voice API"])
+
+
+class DatabaseHealthResponse(BaseModel):
+    """Database-specific health payload (never includes secrets)."""
+
+    status: str
+    database: dict[str, Any]
 
 
 class ErrorResponse(BaseModel):

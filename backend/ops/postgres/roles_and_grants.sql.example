@@ -1,0 +1,57 @@
+-- Example roles and grants for CasaLista Voice PostgreSQL.
+-- Placeholders only. Do NOT paste real passwords. Do NOT run automatically.
+
+-- Suggested roles:
+--   casalista_owner
+--   casalista_migrator
+--   casalista_app
+--   casalista_readonly
+--   casalista_ingestion
+
+-- CREATE ROLE casalista_owner LOGIN PASSWORD '<OWNER_PASSWORD>';
+-- CREATE ROLE casalista_migrator LOGIN PASSWORD '<MIGRATOR_PASSWORD>';
+-- CREATE ROLE casalista_app LOGIN PASSWORD '<APP_PASSWORD>';
+-- CREATE ROLE casalista_readonly LOGIN PASSWORD '<READONLY_PASSWORD>';
+-- CREATE ROLE casalista_ingestion LOGIN PASSWORD '<INGESTION_PASSWORD>';
+
+-- OWNER: owns schemas and can grant privileges.
+-- GRANT ALL ON DATABASE home_30x TO casalista_owner;
+
+-- MIGRATOR: create/alter objects inside CasaLista schemas; run Alembic.
+-- GRANT CONNECT ON DATABASE home_30x TO casalista_migrator;
+-- GRANT USAGE, CREATE ON SCHEMA core, identity, affiliation, leads, housing,
+--   qualification, recommendations, conversations, commercial, ingestion,
+--   audit, analytics TO casalista_migrator;
+-- GRANT CREATE ON DATABASE home_30x TO casalista_migrator;  -- extensions if needed
+
+-- APP: DML only on operational tables. No CREATE/DROP/ALTER/CREATE EXTENSION.
+-- GRANT CONNECT ON DATABASE home_30x TO casalista_app;
+-- GRANT USAGE ON SCHEMA core, identity, affiliation, leads, housing,
+--   qualification, recommendations, conversations, commercial, audit
+--   TO casalista_app;
+-- GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA leads TO casalista_app;
+-- GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA identity TO casalista_app;
+-- GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA affiliation TO casalista_app;
+-- GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA qualification TO casalista_app;
+-- GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA recommendations TO casalista_app;
+-- GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA conversations TO casalista_app;
+-- GRANT SELECT, INSERT, UPDATE ON ALL TABLES IN SCHEMA commercial TO casalista_app;
+-- GRANT SELECT ON ALL TABLES IN SCHEMA core TO casalista_app;
+-- GRANT SELECT ON ALL TABLES IN SCHEMA housing TO casalista_app;
+-- GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA leads TO casalista_app;
+
+-- READONLY: analytics + authorized tables.
+-- GRANT CONNECT ON DATABASE home_30x TO casalista_readonly;
+-- GRANT USAGE ON SCHEMA analytics, housing, leads, commercial TO casalista_readonly;
+-- GRANT SELECT ON ALL TABLES IN SCHEMA analytics TO casalista_readonly;
+-- GRANT SELECT ON ALL TABLES IN SCHEMA housing TO casalista_readonly;
+
+-- INGESTION: write ingestion, read housing, update historical profiles via jobs.
+-- GRANT CONNECT ON DATABASE home_30x TO casalista_ingestion;
+-- GRANT USAGE ON SCHEMA ingestion, housing TO casalista_ingestion;
+-- GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA ingestion
+--   TO casalista_ingestion;
+-- GRANT SELECT ON ALL TABLES IN SCHEMA housing TO casalista_ingestion;
+-- GRANT SELECT, UPDATE ON housing.project_historical_profiles TO casalista_ingestion;
+-- GRANT SELECT, INSERT, UPDATE, DELETE ON housing.project_profile_distributions
+--   TO casalista_ingestion;

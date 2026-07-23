@@ -96,6 +96,24 @@ def inspect_sheet(df: pd.DataFrame, sheet_name: str) -> dict[str, Any]:
     }
 
 
+def inspect_tabular(path: Path) -> dict[str, Any]:
+    if not path.exists():
+        return {"path": str(path), "error": "Archivo no encontrado"}
+    suffix = path.suffix.lower()
+    if suffix == ".csv" or suffix not in {".xlsx", ".xls", ".xlsm"}:
+        try:
+            df = pd.read_csv(path)
+            return {
+                "path": str(path),
+                "sheet_names": ["csv"],
+                "sheets": [inspect_sheet(df, "csv")],
+            }
+        except Exception as exc:  # noqa: BLE001 - report load errors to the operator
+            if suffix == ".csv":
+                return {"path": str(path), "error": f"No se pudo leer CSV: {exc}"}
+    return inspect_excel(path)
+
+
 def inspect_excel(path: Path) -> dict[str, Any]:
     if not path.exists():
         return {"path": str(path), "error": "Archivo no encontrado"}
@@ -160,7 +178,7 @@ def main() -> int:
         print("Debe indicar al menos una ruta con --buyers, --brochures o --extra.")
         return 1
 
-    reports = [inspect_excel(path) for path in paths]
+    reports = [inspect_tabular(path) for path in paths]
     if args.json:
         print(json.dumps(reports, ensure_ascii=False, indent=2))
     else:

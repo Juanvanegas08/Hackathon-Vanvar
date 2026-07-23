@@ -52,6 +52,20 @@ def test_small_sample_does_not_fail() -> None:
     assert profile["category_distribution"]["C"] == 100.0
 
 
+def test_withdrawal_uses_desistio_flag_not_si_no_strings() -> None:
+    df = pd.DataFrame(
+        {
+            "nombre_proyecto": ["Alpha", "Alpha", "Alpha", "Alpha"],
+            "desistio_normalizado": [True, False, False, True],
+            "fecha_desistimiento": ["Si", "No", "No", "Si"],
+            "entidad_financiera_compra": ["Banco", "Colsubsidio", "Banco", "Banco"],
+        }
+    )
+    profile = build_profile_for_group(df, "Alpha")
+    assert profile["withdrawal_percentage"] == 50.0
+    assert profile["frequent_financial_entities"][0] == "Banco"
+
+
 def test_matching_report_structure() -> None:
     catalog = ["MONGUI", "LA MACARENA", "REVISTA"]
     history = [
