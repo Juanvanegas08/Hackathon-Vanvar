@@ -9,7 +9,9 @@ interface ProjectCardProps {
 }
 
 export const ProjectCard = ({ project, onInterest }: ProjectCardProps) => {
-  const reasons = (project.matched_factors ?? []).slice(0, 3)
+  const reasons = project.reason
+    ? [{ factor: 'reason', message: project.reason, contribution: 0 }]
+    : (project.matched_factors ?? []).slice(0, 3)
 
   return (
     <article className="flex h-full flex-col rounded-3xl bg-white p-6 text-left surface-shadow">
@@ -30,6 +32,11 @@ export const ProjectCard = ({ project, onInterest }: ProjectCardProps) => {
         </div>
         <div className="text-right">
           <Badge>{Math.round(project.compatibility_score)}%</Badge>
+          {typeof project.probability === 'number' && (
+            <p className="mt-1 text-xs text-[var(--color-muted)]">
+              Prob. orientativa {(project.probability * 100).toFixed(0)}%
+            </p>
+          )}
           <p className="mt-2 text-xs uppercase tracking-wide text-[var(--color-muted)]">
             Confianza {project.confidence}
           </p>
@@ -42,6 +49,17 @@ export const ProjectCard = ({ project, onInterest }: ProjectCardProps) => {
             <li key={`${factor.factor}-${factor.message}`}>• {factor.message}</li>
           ))}
         </ul>
+      )}
+
+      {project.pros && project.pros.length > 0 && (
+        <div className="mt-4 text-sm text-[var(--color-muted)]">
+          <p className="font-semibold text-[var(--color-ink)]">Por qué encaja</p>
+          <ul className="mt-1 space-y-1">
+            {project.pros.slice(0, 3).map((item) => (
+              <li key={item}>• {item}</li>
+            ))}
+          </ul>
+        </div>
       )}
 
       {project.warnings && project.warnings.length > 0 && (

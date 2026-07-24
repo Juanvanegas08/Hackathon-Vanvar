@@ -63,3 +63,28 @@ class VoiceCompleteResponse(BaseModel):
     navigation_path: str
     assistant_closing: str
     disclaimer: str
+    spoken_summary: str | None = None
+    recommended_projects: list[dict[str, Any]] = Field(default_factory=list)
+    profile_json_path: str | None = None
+    engine: str | None = None
+
+
+class VoiceEngagementRequest(BaseModel):
+    label: Literal[
+        "interesado",
+        "indeciso",
+        "molesto",
+        "trolleando",
+        "ocupado",
+        "desconocido",
+    ]
+    score: int | None = Field(default=None, ge=0, le=100)
+    reason: str | None = Field(default=None, max_length=400)
+
+
+class VoiceEngagementResponse(BaseModel):
+    accepted: bool
+    engagement_label: str
+    engagement_score: int | None = None
+    engagement_reason: str | None = None
+    engagement_updated_at: str | None = None

@@ -1,0 +1,61 @@
+{
+  "schema_version": "1.0",
+  "entity": "lead_profile",
+  "lead_id": "00000000-0000-0000-0000-000000000001",
+  "saved_at": "2026-07-23T00:00:00+00:00",
+  "identity": {
+    "document_type": "CC",
+    "document_number": "1000000001",
+    "known_lead": true,
+    "identity_status": "known_affiliate",
+    "identity_verified": false,
+    "profile_source": "mock_affiliation_service"
+  },
+  "contact": {
+    "nombre": "Ana Pérez",
+    "telefono": "3001234567",
+    "correo": "ana@example.com",
+    "canal_origen": "whatsapp"
+  },
+  "affiliation": {
+    "afiliado": true,
+    "afiliacion_confirmada": true,
+    "categoria_afiliacion": "B",
+    "empresa": "Empresa Ejemplo"
+  },
+  "financial": {
+    "salario_mensual": 2500000,
+    "ingreso_hogar": 4000000,
+    "ahorro": 18000000,
+    "obligaciones_mensuales": 500000
+  },
+  "credit": {
+    "situacion_crediticia": "al_dia"
+  },
+  "household": {
+    "personas_hogar": 3,
+    "personas_a_cargo": 1,
+    "beneficiarios_registrados": 1,
+    "tiene_vivienda": false
+  },
+  "housing_preferences": {
+    "ubicacion_actual": "Bogotá",
+    "ubicacion_deseada": "Ciudadela Maiporé",
+    "plazo_compra": "6_meses",
+    "proyecto_interes": null
+  },
+  "consent": {
+    "consentimiento": true,
+    "data_consent": true,
+    "data_consent_at": "2026-07-23T00:00:00+00:00"
+  },
+  "lifecycle": {
+    "estado_lead": "perfil_incompleto",
+    "fecha_creacion": "2026-07-23T00:00:00+00:00",
+    "fecha_actualizacion": "2026-07-23T00:00:00+00:00",
+    "demo_mode": true
+  },
+  "field_provenance": {},
+  "prefilled_fields": [],
+  "fields_to_confirm": []
+}

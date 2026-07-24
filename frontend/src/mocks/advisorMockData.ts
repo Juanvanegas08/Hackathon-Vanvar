@@ -1,0 +1,387 @@
+import type {
+  AdvisorSummaryResponse,
+  LeadResponse,
+  RecommendationResponse,
+} from '@/api/types'
+
+/** Demo leads for viewing the advisor dashboard without the backend. */
+export const MOCK_ADVISOR_LEADS: LeadResponse[] = [
+  {
+    id: 'mock-lead-laura',
+    nombre: 'Laura Gómez',
+    telefono: '3001234567',
+    correo: 'laura.demo@ejemplo.com',
+    canal_origen: 'voz',
+    consentimiento: true,
+    afiliado: true,
+    afiliacion_confirmada: true,
+    categoria_afiliacion: 'A',
+    empresa: 'Empresa Demo SAS',
+    salario_mensual: 2_800_000,
+    ingreso_hogar: 4_200_000,
+    ahorro: 18_000_000,
+    obligaciones_mensuales: 450_000,
+    tiene_vivienda: false,
+    personas_hogar: 3,
+    personas_a_cargo: 1,
+    beneficiarios_registrados: 2,
+    situacion_crediticia: 'al_dia',
+    ubicacion_actual: 'Bogotá',
+    ubicacion_deseada: 'Soacha',
+    plazo_compra: '3_meses',
+    proyecto_interes: 'Monguí',
+    preferencias: ['cerca_transporte', 'parques'],
+    document_type: 'CC',
+    document_number: '1000000001',
+    known_lead: true,
+    identity_status: 'known_affiliate',
+    identity_verified: false,
+    profile_source: 'mock_affiliation_service',
+    prefilled_fields: ['afiliado', 'categoria_afiliacion', 'empresa'],
+    fields_to_confirm: ['salario_mensual'],
+    demo_mode: true,
+    estado_lead: 'listo_para_asesor',
+    status: 'listo_para_asesor',
+  },
+  {
+    id: 'mock-lead-andres',
+    nombre: 'Andrés Ruiz',
+    telefono: '3109876543',
+    correo: 'andres.demo@ejemplo.com',
+    canal_origen: 'web',
+    consentimiento: true,
+    afiliado: false,
+    afiliacion_confirmada: true,
+    categoria_afiliacion: null,
+    empresa: null,
+    salario_mensual: 3_500_000,
+    ingreso_hogar: 3_500_000,
+    ahorro: 12_000_000,
+    obligaciones_mensuales: 800_000,
+    tiene_vivienda: false,
+    personas_hogar: 2,
+    personas_a_cargo: 0,
+    situacion_crediticia: 'sin_reportes',
+    ubicacion_deseada: 'Cajicá',
+    plazo_compra: '6_meses',
+    proyecto_interes: null,
+    preferencias: ['seguridad', 'espacios_verdes'],
+    document_type: 'CC',
+    document_number: '1000000005',
+    known_lead: true,
+    identity_status: 'known_non_affiliate',
+    identity_verified: false,
+    profile_source: 'mock_affiliation_service',
+    fields_to_confirm: [],
+    demo_mode: true,
+    estado_lead: 'en_evaluacion',
+    status: 'en_evaluacion',
+  },
+  {
+    id: 'mock-lead-sofia',
+    nombre: 'Sofía Martínez',
+    telefono: '3205551212',
+    correo: null,
+    canal_origen: 'voz',
+    consentimiento: true,
+    afiliado: null,
+    afiliacion_confirmada: false,
+    categoria_afiliacion: null,
+    salario_mensual: null,
+    ingreso_hogar: 2_200_000,
+    ahorro: 4_000_000,
+    obligaciones_mensuales: null,
+    tiene_vivienda: false,
+    personas_hogar: 4,
+    personas_a_cargo: 2,
+    situacion_crediticia: 'desconocida',
+    ubicacion_deseada: 'Bosa',
+    plazo_compra: '12_meses',
+    document_type: 'CC',
+    document_number: '9999999999',
+    known_lead: false,
+    identity_status: 'new_lead',
+    identity_verified: false,
+    fields_to_confirm: ['afiliado', 'salario_mensual', 'situacion_crediticia'],
+    demo_mode: true,
+    estado_lead: 'nutricion',
+    status: 'nutricion',
+  },
+]
+
+const summaries: Record<string, AdvisorSummaryResponse> = {
+  'mock-lead-laura': {
+    lead_id: 'mock-lead-laura',
+    headline: 'Lead afiliado conocido con datos precargados',
+    basic_data: {
+      nombre: 'Laura Gómez',
+      telefono: '3001234567',
+      correo: 'laura.demo@ejemplo.com',
+      canal_origen: 'voz',
+    },
+    affiliation: { is_affiliated: true, category: 'A', confirmed: true },
+    financial_profile: {
+      personal_income: 2_800_000,
+      household_income: 4_200_000,
+      savings: 18_000_000,
+      monthly_obligations: 450_000,
+    },
+    household: {
+      personas_hogar: 3,
+      personas_a_cargo: 1,
+      beneficiarios_registrados: 2,
+      tiene_vivienda: false,
+    },
+    readiness: { score: 82, status: 'listo_para_asesor', confidence: 'high' },
+    gaps: ['Confirmar salario laboral en la conversación comercial'],
+    fields_to_confirm: ['salario_mensual'],
+    confirmed_fields: ['afiliado', 'categoria_afiliacion', 'empresa', 'ahorro'],
+    field_sources: {},
+    identity_context: {
+      known_lead: true,
+      identity_status: 'known_affiliate',
+      identity_verified: false,
+      demo_mode: true,
+    },
+    recommended_projects: [],
+    next_action: 'Validar salario y agendar visita al proyecto top',
+    disclaimer:
+      'Resultado orientativo. No constituye una aprobación de crédito hipotecario.',
+  },
+  'mock-lead-andres': {
+    lead_id: 'mock-lead-andres',
+    headline: 'Lead no afiliado en evaluación',
+    basic_data: {
+      nombre: 'Andrés Ruiz',
+      telefono: '3109876543',
+      correo: 'andres.demo@ejemplo.com',
+      canal_origen: 'web',
+    },
+    affiliation: { is_affiliated: false, category: null, confirmed: true },
+    financial_profile: {
+      personal_income: 3_500_000,
+      household_income: 3_500_000,
+      savings: 12_000_000,
+      monthly_obligations: 800_000,
+    },
+    household: {
+      personas_hogar: 2,
+      personas_a_cargo: 0,
+      tiene_vivienda: false,
+    },
+    readiness: { score: 64, status: 'en_evaluacion', confidence: 'medium' },
+    gaps: ['Explicar disponibilidad comercial para no afiliados'],
+    fields_to_confirm: [],
+    confirmed_fields: ['afiliado', 'ingreso_hogar', 'ubicacion_deseada'],
+    field_sources: {},
+    identity_context: {
+      known_lead: true,
+      identity_status: 'known_non_affiliate',
+      identity_verified: false,
+      demo_mode: true,
+    },
+    recommended_projects: [],
+    recommendation_warning: null,
+    next_action: 'Presentar 2 opciones compatibles y aclarar cupo 90/10',
+    disclaimer:
+      'Resultado orientativo. No constituye una aprobación de crédito hipotecario.',
+  },
+  'mock-lead-sofia': {
+    lead_id: 'mock-lead-sofia',
+    headline: 'Lead con perfil inicial para nutrición',
+    basic_data: {
+      nombre: 'Sofía Martínez',
+      telefono: '3205551212',
+      correo: null,
+      canal_origen: 'voz',
+    },
+    affiliation: { is_affiliated: null, category: null, confirmed: false },
+    financial_profile: {
+      personal_income: null,
+      household_income: 2_200_000,
+      savings: 4_000_000,
+      monthly_obligations: null,
+    },
+    household: {
+      personas_hogar: 4,
+      personas_a_cargo: 2,
+      tiene_vivienda: false,
+    },
+    readiness: { score: 38, status: 'nutricion', confidence: 'low' },
+    gaps: [
+      'Falta confirmar afiliación',
+      'Falta salario laboral',
+      'Situación crediticia poco clara',
+    ],
+    fields_to_confirm: ['afiliado', 'salario_mensual', 'situacion_crediticia'],
+    confirmed_fields: ['ubicacion_deseada', 'personas_a_cargo'],
+    field_sources: {},
+    identity_context: {
+      known_lead: false,
+      identity_status: 'new_lead',
+      identity_verified: false,
+      demo_mode: true,
+    },
+    recommended_projects: [],
+    recommendation_warning:
+      'Información insuficiente del lead para generar recomendaciones completas.',
+    next_action: 'Completar afiliación e ingresos antes del cierre comercial',
+    disclaimer:
+      'Resultado orientativo. No constituye una aprobación de crédito hipotecario.',
+  },
+}
+
+const recommendations: Record<string, RecommendationResponse> = {
+  'mock-lead-laura': {
+    lead_id: 'mock-lead-laura',
+    recommendation_status: 'ok',
+    evaluated_projects: 12,
+    spoken_summary:
+      'Laura encaja especialmente con Monguí por zona, afiliación A y ahorro identificado. Como alternativa cercana está Hacienda los Arrayanes.',
+    engine: 'mock',
+    recommended_projects: [
+      {
+        project_id: 'mongui',
+        project_name: 'Monguí',
+        canonical_project_id: 'mongui',
+        rank: 1,
+        compatibility_score: 91,
+        confidence: 'high',
+        matched_factors: [
+          { factor: 'zona', message: 'Coincide con zona deseada Soacha', contribution: 28 },
+          { factor: 'afiliacion', message: 'Afiliada categoría A con buen fit', contribution: 24 },
+          { factor: 'ahorro', message: 'Ahorro compatible con la etapa del proyecto', contribution: 18 },
+        ],
+        pros: ['Buena cercanía a transporte', 'Perfil familiar alineado'],
+        municipio: 'Soacha',
+        departamento: 'Cundinamarca',
+        etapa: 'comercializacion',
+        brochure_url: 'https://example.com/brochure-mongui',
+      },
+      {
+        project_id: 'arrayanes',
+        project_name: 'Hacienda los Arrayanes',
+        canonical_project_id: 'hacienda-los-arrayanes',
+        rank: 2,
+        compatibility_score: 84,
+        confidence: 'medium',
+        matched_factors: [
+          { factor: 'capacidad', message: 'Capacidad financiera alineada', contribution: 22 },
+        ],
+        pros: ['Alternativa con buena relación valor/ubicación'],
+        municipio: 'Soacha',
+        departamento: 'Cundinamarca',
+        etapa: 'comercializacion',
+      },
+      {
+        project_id: 'altos',
+        project_name: 'Altos del Sol',
+        canonical_project_id: 'altos-del-sol',
+        rank: 3,
+        compatibility_score: 76,
+        confidence: 'medium',
+        matched_factors: [
+          { factor: 'plazo', message: 'Plazo de compra compatible', contribution: 15 },
+        ],
+        municipio: 'Bogotá',
+        departamento: 'Cundinamarca',
+      },
+    ],
+  },
+  'mock-lead-andres': {
+    lead_id: 'mock-lead-andres',
+    recommendation_status: 'ok',
+    evaluated_projects: 10,
+    spoken_summary:
+      'Andrés no es afiliado, pero hay opciones compatibles. Prioriza transparencia sobre cupo y presenta dos proyectos ancla.',
+    engine: 'mock',
+    regulatory_context: { rule: '90/10', note: 'Disponibilidad para no afiliados' },
+    recommended_projects: [
+      {
+        project_id: 'bosques',
+        project_name: 'Bosques de Cajicá',
+        canonical_project_id: 'bosques-cajica',
+        rank: 1,
+        compatibility_score: 79,
+        confidence: 'medium',
+        matched_factors: [
+          { factor: 'zona', message: 'Alineado a Cajicá', contribution: 30 },
+        ],
+        warnings: ['Validar cupo comercial para no afiliados'],
+        municipio: 'Cajicá',
+        departamento: 'Cundinamarca',
+      },
+      {
+        project_id: 'reserva',
+        project_name: 'La Reserva',
+        canonical_project_id: 'la-reserva',
+        rank: 2,
+        compatibility_score: 72,
+        confidence: 'medium',
+        matched_factors: [
+          { factor: 'ingreso', message: 'Ingreso compatible con ticket medio', contribution: 20 },
+        ],
+        municipio: 'Chía',
+        departamento: 'Cundinamarca',
+      },
+      {
+        project_id: 'parque',
+        project_name: 'Parque Verde',
+        canonical_project_id: 'parque-verde',
+        rank: 3,
+        compatibility_score: 68,
+        confidence: 'low',
+        matched_factors: [],
+        municipio: 'Zipaquirá',
+        departamento: 'Cundinamarca',
+      },
+    ],
+  },
+  'mock-lead-sofia': {
+    lead_id: 'mock-lead-sofia',
+    recommendation_status: 'insufficient_information',
+    evaluated_projects: 4,
+    spoken_summary:
+      'Aún falta información clave. Puedes dejar una opción ancla en Bosa y completar afiliación e ingresos.',
+    engine: 'mock',
+    recommended_projects: [
+      {
+        project_id: 'bosa-verde',
+        project_name: 'Villas de Bosa',
+        canonical_project_id: 'villas-bosa',
+        rank: 1,
+        compatibility_score: 61,
+        confidence: 'low',
+        matched_factors: [
+          { factor: 'zona', message: 'Coincide con Bosa', contribution: 25 },
+        ],
+        warnings: ['Perfil incompleto: no cierres sin confirmar afiliación e ingresos'],
+        municipio: 'Bogotá',
+        departamento: 'Cundinamarca',
+      },
+    ],
+  },
+}
+
+export const isAdvisorMockEnabled = (searchMock?: string | null): boolean => {
+  if (searchMock === '1' || searchMock === 'true') return true
+  if (searchMock === '0' || searchMock === 'false') return false
+  return import.meta.env.VITE_ADVISOR_MOCK === 'true'
+}
+
+export const listMockAdvisorLeads = async (): Promise<LeadResponse[]> =>
+  Promise.resolve(MOCK_ADVISOR_LEADS)
+
+export const getMockAdvisorDetail = async (leadId: string) => {
+  const lead = MOCK_ADVISOR_LEADS.find((item) => item.id === leadId)
+  const summary = summaries[leadId]
+  const recommendation = recommendations[leadId]
+  if (!lead || !summary || !recommendation) {
+    throw new Error('Lead demo no encontrado')
+  }
+  return {
+    lead,
+    summary,
+    recommendations: recommendation,
+  }
+}

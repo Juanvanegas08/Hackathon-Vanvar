@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { ChevronDown } from 'lucide-react'
 import type { LeadResponse } from '@/api/types'
 import { DetectedFacts } from '@/components/conversation/DetectedFacts'
+import { EngagementBadge } from '@/components/conversation/EngagementBadge'
 import { getProfileProgress } from '@/utils/profileProgress'
 
 const messages: Record<string, string> = {
@@ -19,6 +20,9 @@ export const ProfileSidebar = ({ lead }: { lead?: LeadResponse | null }) => {
   return (
     <aside className="rounded-3xl border border-[var(--color-line)] bg-white p-5 text-left">
       <h2 className="font-display text-xl">Tu perfil de vivienda</h2>
+      <div className="mt-4">
+        <EngagementBadge lead={lead} />
+      </div>
       {nextIncomplete && (
         <p className="mt-2 text-sm text-[var(--color-muted)]">
           {messages[nextIncomplete.key] ?? 'Seguimos avanzando juntos.'}

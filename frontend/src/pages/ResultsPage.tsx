@@ -2,9 +2,11 @@ import { useQuery } from '@tanstack/react-query'
 import { motion } from 'framer-motion'
 import { useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
-import { evaluateLead, getSummary } from '@/api/leads.api'
+import { evaluateLead, getLead, getSummary } from '@/api/leads.api'
 import { getRecommendations } from '@/api/recommendations.api'
 import { ProjectCard } from '@/components/recommendations/ProjectCard'
+import { LauraRecommendationSpeech } from '@/components/recommendations/LauraRecommendationSpeech'
+import { EngagementBadge } from '@/components/conversation/EngagementBadge'
 import { AppShell } from '@/components/layout/AppShell'
 import { Button } from '@/components/ui/Button'
 import { ErrorState } from '@/components/ui/ErrorState'
@@ -36,19 +38,23 @@ export const ResultsPage = () => {
     enabled: Boolean(leadId),
   })
 
+  const leadQuery = useQuery({
+    queryKey: ['lead', leadId],
+    queryFn: () => getLead(leadId),
+    enabled: Boolean(leadId),
+  })
+
   const loading =
-    readinessQuery.isLoading || recommendationsQuery.isLoading || summaryQuery.isLoading
-  const error =
-    readinessQuery.error || recommendationsQuery.error || summaryQuery.error
+    readinessQuery.isLoading || recommendationsQuery.isLoading
+  const error = readinessQuery.error || recommendationsQuery.error
 
   const readiness = readinessQuery.data
   const recommendations = recommendationsQuery.data
   const projects = recommendations?.recommended_projects ?? []
   const uniqueCanonical = new Set(projects.map((item) => item.canonical_project_id))
   const affiliated = summaryQuery.data?.affiliation
-    ? Boolean(
-        (summaryQuery.data.affiliation as { afiliado?: boolean | null }).afiliado,
-      )
+    ? ((summaryQuery.data.affiliation as { is_affiliated?: boolean | null }).is_affiliated ??
+      null)
     : null
 
   const readyForAdvisor =
@@ -66,11 +72,15 @@ export const ResultsPage = () => {
   }
 
   if (error) {
+    const detail =
+      error instanceof Error && error.message
+        ? error.message
+        : 'Revisa que el backend esté en ejecución.'
     return (
       <AppShell>
         <div className="mx-auto max-w-lg py-16">
           <ErrorState
-            message="No pudimos generar tus recomendaciones. Revisa que el backend esté en ejecución."
+            message={`No pudimos generar tus recomendaciones. ${detail}`}
             onRetry={() => {
               void readinessQuery.refetch()
               void recommendationsQuery.refetch()
@@ -98,6 +108,10 @@ export const ResultsPage = () => {
         <p className="mt-4 max-w-2xl text-[var(--color-muted)]">
           Este resultado es orientativo y no constituye una aprobación de crédito hipotecario.
         </p>
+
+        <div className="mt-6 max-w-xl">
+          <EngagementBadge lead={leadQuery.data} />
+        </div>
 
         <div className="mt-8 grid gap-4 md:grid-cols-3">
           <div className="rounded-3xl bg-white p-5 surface-shadow">
@@ -146,8 +160,19 @@ export const ResultsPage = () => {
             <h2 className="font-display text-3xl">Proyectos sugeridos</h2>
             <p className="text-sm text-[var(--color-muted)]">
               {uniqueCanonical.size} canónicos · sin duplicados
+              {recommendations?.engine ? ` · motor ${recommendations.engine}` : ''}
             </p>
           </div>
+
+          {recommendations?.spoken_summary && (
+            <LauraRecommendationSpeech
+              spokenSummary={recommendations.spoken_summary}
+              brochureUrl={projects[0]?.brochure_url}
+              projectName={projects[0]?.project_name}
+              autoPlay
+            />
+          )}
+
           <div className="grid gap-5 lg:grid-cols-3">
             {projects.map((project) => (
               <ProjectCard

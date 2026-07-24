@@ -82,6 +82,9 @@ class RecommendationResponse(BaseModel):
     general_warnings: list[str] = Field(default_factory=list)
     disclaimer: str
     generated_at: datetime
+    spoken_summary: str | None = None
+    engine: str = "deterministic"
+    profile_json_path: str | None = None
 
 
 # Re-export for convenience in OpenAPI examples.

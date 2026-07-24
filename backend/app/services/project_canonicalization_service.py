@@ -215,6 +215,7 @@ class ProjectCanonicalizationService:
                     "match_kinds": bucket["metadata"]["match_kinds"],
                     "catalog_count": len(bucket["catalog_records"]),
                     "historical_buyers": merged_profile.total_buyers,
+                    **self._brochure_context_from_records(bucket["catalog_records"]),
                 },
             )
             canonical_projects.append(project)
@@ -304,6 +305,33 @@ class ProjectCanonicalizationService:
             missing_data_percentage=best.get("missing_data_percentage") or {},
             age_range_distribution=best.get("age_range_distribution") or {},
         )
+
+    @staticmethod
+    def _brochure_context_from_records(records: list[dict[str, Any]]) -> dict[str, Any]:
+        """Keep brochure text/ficha context from enriched catalog rows."""
+        for record in records:
+            meta = record.get("metadata") if isinstance(record, dict) else None
+            if not isinstance(meta, dict):
+                continue
+            summary = meta.get("brochure_summary") or record.get("descripcion")
+            ficha = meta.get("ficha")
+            if summary or ficha:
+                payload: dict[str, Any] = {}
+                if summary:
+                    payload["brochure_summary"] = summary
+                if meta.get("brochure_pdf_url"):
+                    payload["brochure_pdf_url"] = meta.get("brochure_pdf_url")
+                if meta.get("brochure_source"):
+                    payload["brochure_source"] = meta.get("brochure_source")
+                if record.get("descripcion"):
+                    payload["descripcion"] = record.get("descripcion")
+                if isinstance(ficha, dict) and ficha:
+                    payload["ficha"] = ficha
+                    payload["descripcion"] = payload.get("descripcion") or ficha.get(
+                        "resumen"
+                    )
+                return payload
+        return {}
 
     def _load_alias_groups(self) -> dict[str, ProjectAliasGroup]:
         if not self._aliases_path.exists():

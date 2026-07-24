@@ -13,6 +13,9 @@ export class ApiError extends Error {
 }
 
 const friendlyMessage = (error: AxiosError<{ detail?: unknown }>): string => {
+  if (error.code === 'ECONNABORTED') {
+    return 'La solicitud tardó demasiado. El recomendador sigue procesando; inténtalo de nuevo en unos segundos.'
+  }
   if (!error.response) {
     return 'No pudimos conectarnos con el servicio. Verifica que el backend esté disponible.'
   }
@@ -25,7 +28,7 @@ const friendlyMessage = (error: AxiosError<{ detail?: unknown }>): string => {
 }
 
 export const apiClient = axios.create({
-  baseURL: import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000',
+  baseURL: import.meta.env.VITE_API_BASE_URL || 'http://localhost:8100',
   timeout: 15_000,
   headers: { 'Content-Type': 'application/json' },
 })

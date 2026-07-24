@@ -26,15 +26,15 @@ Incluye:
 
 No incluye todavía:
 
-- OpenAI / agente de voz
-- Twilio
-- Frontend
+- Seeds / importación Excel (fase siguiente)
+- Sustitución definitiva de repositorios en memoria
 - CRM, DataCrédito o sistemas reales de afiliación
 - Autenticación real por OTP
 - Aprobación de créditos
 - Envío de correos o WhatsApp
 - Modelos predictivos / redes neuronales
-- PostgreSQL / Supabase
+- Twilio (pendiente)
+
 
 ## Tecnologías
 
@@ -42,6 +42,7 @@ No incluye todavía:
 - FastAPI
 - Pydantic v2
 - Uvicorn
+- SQLAlchemy 2.x (async) + Alembic + Psycopg 3
 - Pandas + OpenPyXL
 - python-dotenv + pydantic-settings
 - Pytest
@@ -107,8 +108,18 @@ PROJECT_PROFILES_PATH=./data/processed/project_profiles.json
 PROJECT_ALIASES_PATH=./data/processed/project_aliases.json
 PROJECTS_CANONICAL_PATH=./data/processed/projects_canonical.json
 MOCK_AFFILIATES_PATH=./data/mock/mock_affiliates.json
+MOCK_AFFILIATES_HISTORICAL_PATH=./data/mock/mock_affiliates_historical.json
 ```
 
+Mock de compradores históricos (mismo esquema del CSV del reto, datos ficticios):
+
+```bash
+python scripts/generate_mock_buyers.py
+python scripts/prepare_data.py --buyers data/mock/mock_buyers.csv --brochures "docs/Links brochures.xlsx"
+python scripts/generate_synthetic_persons.py
+```
+
+El CSV del reto **no trae PII**: cada fila es un hecho de compra/perfil. `generate_synthetic_persons.py` crea una persona ficticia 1:1 (CC `9000…`, contacto, afiliación demo) y el JSON para el lookup mock.
 Importante: configura `SMMLV` con el salario mínimo vigente antes de calcular categorías A/B/C. Si `SMMLV <= 0`, el cálculo salarial se bloquea con un error controlado. La categoría D (no afiliado) no requiere SMMLV.
 
 ## Ejecución de la API
@@ -154,13 +165,27 @@ python scripts/inspect_data.py --buyers "RUTA_ARCHIVO" --brochures "RUTA_ARCHIVO
 python scripts/prepare_data.py --buyers "RUTA_ARCHIVO" --brochures "RUTA_ARCHIVO"
 ```
 
+Acepta Excel (`.xlsx`) o CSV. Para el export del hackathon:
+
+```bash
+python scripts/prepare_data.py --buyers "docs/hackathon_VIVIENDAv2.xlsx - CV_SSS_VIV_PENETRACION_PERFIL_C.csv"
+```
+
 Salidas en `data/processed/`:
 
 - `buyers_clean.csv`
 - `buyers_clean.json`
+- `buyers_seed.json` (listo para `ingestion.normalized_buyer_records`)
 - `projects_catalog.json`
 - `data_quality_report.json`
 - `column_mapping.json`
+
+Normalizaciones específicas del export:
+
+- Afiliación inferida desde `PERIODO_AFILIADO` (vacío = no afiliado)
+- `FECHA_DESISTIMIENTO` como `Si`/`No` → `desistio_normalizado`
+- `VLR_VIVIENDA` escalado `/10000` por formato de exportación
+- `CATEGORIA` / `SEGMENTO_POBLACIONAL` ofuscados se conservan en `normalized_data` (no se fuerzan a A/B/C/D)
 
 Nota: la base histórica contiene principalmente compradores y desistimientos. No representa todos los leads que nunca compraron y no debe usarse como predicción directa de conversión.
 
@@ -301,7 +326,7 @@ El backend mintá un token efímero para el navegador. La clave `OPENAI_API_KEY`
 ```env
 OPENAI_API_KEY=
 OPENAI_REALTIME_MODEL=gpt-realtime-2.1
-OPENAI_REALTIME_VOICE=marin
+OPENAI_REALTIME_VOICE=coral
 OPENAI_REALTIME_TRANSCRIPTION_MODEL=gpt-4o-mini-transcribe
 OPENAI_REALTIME_ENABLED=true
 OPENAI_REQUEST_TIMEOUT_SECONDS=20
@@ -325,11 +350,201 @@ El agente no puede modificar campos arbitrarios: el backend valida el campo espe
 - Costos variables según uso de OpenAI.
 - Si `OPENAI_API_KEY` falta o Realtime está deshabilitado, el frontend puede continuar en modo mock/texto.
 
+## Persistencia PostgreSQL (infraestructura)
+
+Esta fase agrega la infraestructura de base de datos **sin** sustituir todavía los repositorios en memoria (`PERSISTENCE_PROVIDER=memory`).
+
+### Arquitectura de schemas
+
+```text
+core | identity | affiliation | leads | housing
+qualification | recommendations | conversations
+commercial | ingestion | audit | analytics
+```
+
+Relaciones principales (texto):
+
+```text
+identity.persons
+  └── leads.leads
+        ├── leads.lead_profiles (1:1)
+        ├── qualification.assessments
+        ├── recommendations.recommendation_runs
+        └── conversations.conversation_sessions
+
+housing.projects
+  └── recommendations.recommendation_items
+
+ingestion.import_batches
+  └── housing.project_historical_profiles.source_batch_id
+```
+
+### Dependencias nuevas
+
+```text
+SQLAlchemy>=2.0,<2.1
+alembic>=1.18,<2
+psycopg[binary]>=3.2,<4
+```
+
+### Variables de entorno
+
+```env
+DATABASE_ENABLED=true
+DATABASE_URL=postgresql+psycopg://USER:PASSWORD@HOST:5432/home_30x
+DATABASE_ADMIN_URL=
+DATABASE_NAME=home_30x
+DATABASE_ECHO=false
+PERSISTENCE_PROVIDER=memory
+TEST_DATABASE_URL=
+```
+
+Reglas:
+
+- `DATABASE_URL` la usan SQLAlchemy y Alembic.
+- `DATABASE_ADMIN_URL` solo para crear la base (opcional).
+- `PERSISTENCE_PROVIDER=memory` mantiene la API actual en memoria.
+- Las pruebas destructivas usan únicamente `TEST_DATABASE_URL`.
+
+### Permisos requeridos en `home_30x`
+
+El usuario de migraciones necesita `CREATE` en la base (hoy `home_30x` es owned by `postgres`).
+
+Como rol `postgres` / owner:
+
+```sql
+GRANT CONNECT, CREATE ON DATABASE home_30x TO vanvar_plane_dev_user;
+-- preferible en hackathon:
+-- ALTER DATABASE home_30x OWNER TO vanvar_plane_dev_user;
+```
+
+Ver también [`ops/postgres/grant_migrator_on_home_30x.sql.example`](ops/postgres/grant_migrator_on_home_30x.sql.example).
+
+### Crear la base (opcional)
+
+PowerShell:
+
+```powershell
+cd backend
+python scripts/bootstrap_database.py --check-only
+```
+
+Linux/macOS:
+
+```bash
+cd backend
+python scripts/bootstrap_database.py --check-only
+```
+
+### Migraciones
+
+```powershell
+cd backend
+python -m alembic upgrade head
+python -m alembic current --check-heads
+python -m alembic check
+python scripts/verify_migrations.py
+```
+
+Downgrade:
+
+```powershell
+python -m alembic downgrade -1
+python -m alembic downgrade base
+```
+
+Futuras migraciones:
+
+```powershell
+python -m alembic revision --autogenerate -m "description"
+python -m alembic upgrade head
+```
+
+### Health checks
+
+| Método | Ruta | Descripción |
+|--------|------|-------------|
+| GET | `/health` | Salud del servicio (no depende de PostgreSQL) |
+| GET | `/health/database` | Conexión, Alembic head, schemas y extensiones |
+
+### Convenciones
+
+- Tablas/columnas en `snake_case`, schemas explícitos (nunca `public` para negocio).
+- UUID nativo + `gen_random_uuid()`.
+- Dinero en `NUMERIC(14,2)` (nunca `FLOAT`).
+- JSONB solo para metadata flexible.
+- Identificadores sensibles: hash + ciphertext (sin texto plano).
+- Constraints e índices con nombre.
+
+### Roles (ejemplo)
+
+Ver [`ops/postgres/roles_and_grants.sql.example`](ops/postgres/roles_and_grants.sql.example). No se ejecuta automáticamente.
+
+### Limitaciones de esta fase
+
+- Los leads de la API siguen en memoria.
+- No hay seeds ni importación Excel.
+- No hay cifrado real de PII (solo columnas preparadas).
+- En Windows, Alembic/psycopg async usa `SelectorEventLoop`.
+
+### Seeds / carga histórica
+
+Tras `prepare_data`, `generate_synthetic_persons` y `build_project_profiles`:
+
+```bash
+python scripts/prepare_data.py --buyers "docs/hackathon_VIVIENDAv2.xlsx - CV_SSS_VIV_PENETRACION_PERFIL_C.csv" --brochures "docs/Links brochures.xlsx"
+python scripts/generate_synthetic_persons.py
+python scripts/build_project_profiles.py --buyers data/processed/buyers_clean.csv --projects data/processed/projects_catalog.json
+alembic upgrade head   # incluye 0009 person_id en normalized_buyer_records
+python scripts/seed_historical_data.py --dry-run
+python scripts/seed_historical_data.py
+```
+
+Reemplazar un seed previo:
+
+```bash
+python scripts/seed_historical_data.py --force
+```
+
+Carga en PostgreSQL:
+
+- `identity.persons` (+ `person_identifiers`, `contact_points`) — personas sintéticas `is_demo=true`
+- `affiliation.affiliation_records` (+ employers) — enlazadas por `person_id`
+- `housing.projects` (+ etapas, precios, assets)
+- `ingestion.import_batches` + `normalized_buyer_records` (**con `person_id` FK**)
+- `housing.project_historical_profiles` + `project_profile_distributions`
+- `ingestion.seed_executions` (idempotencia por checksum)
+
+Defaults de rutas: `data/processed/buyers_seed.json`, `persons_seed.json`, `projects_catalog.json`, `project_profiles.json`.
+
+Las CC sintéticas (`9000000000 + row_number`) quedan consultables vía `MockAffiliationLookupProvider` si existe `data/mock/mock_affiliates_historical.json`.
+
+### Brochures / 360
+
+```bash
+python scripts/prepare_data.py --buyers "docs/....csv" --brochures "docs/Links brochures .xlsx"
+python scripts/seed_brochure_assets.py --dry-run
+python scripts/seed_brochure_assets.py
+```
+
+Actualiza `project_assets` (brochure + tour_360), `project_locations` y `project_aliases` emparejando por nombre (no requiere `--force` del seed histórico).
+
+### Recuperación de errores comunes
+
+| Error | Acción |
+|-------|--------|
+| `permission denied for database` | Otorgar `CREATE` o ownership sobre `home_30x` |
+| extensión no crea | Crear `pgcrypto/citext/unaccent/pg_trgm` como superuser |
+| `TEST_DATABASE_URL` vacío | Las pruebas de migración se omiten a propósito |
+| ProactorEventLoop (Windows) | Usar el `env.py` del repo (ya ajustado) |
+
 ## Endpoints principales
+
 
 | Método | Ruta | Descripción |
 |--------|------|-------------|
 | GET | `/health` | Salud del servicio |
+| GET | `/health/database` | Salud de PostgreSQL (degraded si no hay permisos/migraciones) |
 | POST | `/api/v1/leads` | Crear lead |
 | POST | `/api/v1/leads/from-identity` | Crear lead desde identidad simulada |
 | POST | `/api/v1/leads/{id}/confirm-prefilled-data` | Confirmar/corregir precarga |
@@ -395,7 +610,7 @@ curl -X POST http://localhost:8000/api/v1/leads/{LEAD_ID}/confirm-prefilled-data
 
 ## Limitaciones actuales
 
-- Persistencia solo en memoria (se pierde al reiniciar)
+- Persistencia operativa de leads todavía en memoria (`PERSISTENCE_PROVIDER=memory`); la estructura PostgreSQL ya existe
 - La afiliación conocida es **simulada**; no consulta sistemas reales de Colsubsidio
 - Sin OTP ni verificación real de identidad
 - Sin integración real de buró de crédito
@@ -403,13 +618,13 @@ curl -X POST http://localhost:8000/api/v1/leads/{LEAD_ID}/confirm-prefilled-data
 - El catálogo actual no trae municipio/departamento/ubicación confiables
 - Los precios históricos (`VLR_VIVIENDA`) tienen escala no confiable y no se usan para excluir proyectos
 - La restricción comercial 90/10 está modelada como contexto regulatorio, sin contador real de ventas
-- No hay agente de voz ni frontend
+- Sin seeds ni carga Excel todavía
 
 ## Próximos pasos
 
-1. Enriquecer ubicación/precios confiables del catálogo
-2. Persistencia en PostgreSQL / Supabase
-3. Sustituir el mock de afiliación por integración autorizada
-4. Agente de voz conversacional
+1. Otorgar permisos de migrador sobre `home_30x` y aplicar `alembic upgrade head`
+2. Seeds + normalización histórica
+3. Repositorios PostgreSQL detrás de `PERSISTENCE_PROVIDER`
+4. Sustituir el mock de afiliación por integración autorizada
 5. Integración Twilio
 6. Autenticación/OTP para verificación de identidad

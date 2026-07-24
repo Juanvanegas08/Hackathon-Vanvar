@@ -23,3 +23,18 @@ class LeadRepository(Protocol):
 
     def delete(self, lead_id: UUID) -> bool:
         """Delete a lead. Returns True if a record was removed."""
+
+    def get_by_document(
+        self,
+        document_type: str,
+        document_number: str,
+        *,
+        country_code: str = "CO",
+    ) -> Lead | None:
+        """Return an existing lead matched by document identifier."""
+
+    def save_profile(self, lead: Lead) -> Lead:
+        """Persist the completed/updated profile for a lead."""
+
+    def reset_profile(self, lead: Lead) -> Lead:
+        """Persist a wiped profile and clear related recommendation artifacts."""

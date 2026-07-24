@@ -7,9 +7,11 @@ from app.api.routes import (
     health,
     identity,
     leads,
+    phone_calls,
     projects,
     realtime,
     recommendations,
+    twilio_voice,
     voice,
 )
 from app.core.config import get_settings
@@ -27,6 +29,8 @@ def build_api_router() -> APIRouter:
     api_router.include_router(evaluation.router)
     api_router.include_router(realtime.router)
     api_router.include_router(voice.router)
+    api_router.include_router(phone_calls.router)
+    api_router.include_router(twilio_voice.router)
     # Health is also mounted at root in main.py; keep a versioned alias.
     api_router.include_router(health.router)
     return api_router

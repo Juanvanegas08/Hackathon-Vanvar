@@ -6,22 +6,33 @@ from app.core.config import Settings, get_settings
 from app.providers.mock_affiliation_provider import MockAffiliationLookupProvider
 from app.providers.openai_realtime_provider import OpenAIRealtimeProvider
 from app.repositories.json_project_repository import JsonProjectRepository
+from app.repositories.lead_repository import LeadRepository
 from app.repositories.memory_lead_repository import MemoryLeadRepository
+from app.repositories.postgres_lead_repository import PostgresLeadRepository
 from app.services.affiliation_service import AffiliationService
 from app.services.identity_service import IdentityService
 from app.services.lead_service import LeadService
+from app.services.phone_call_orchestrator import PhoneCallOrchestrator
 from app.services.project_profile_service import ProjectProfileService
 from app.services.question_service import QuestionService
 from app.services.readiness_service import ReadinessService
 from app.services.realtime_session_service import RealtimeSessionService
 from app.services.recommendation_service import RecommendationService
+from app.services.scheduled_call_service import ScheduledCallService
 from app.services.summary_service import SummaryService
+from app.services.twilio_call_service import TwilioCallService
 from app.services.voice_orchestration_service import VoiceOrchestrationService
 
 
 @lru_cache
-def get_lead_repository() -> MemoryLeadRepository:
-    """Return the process-wide in-memory repository instance."""
+def get_lead_repository() -> LeadRepository:
+    """Return the process-wide lead repository (memory or Postgres)."""
+    settings = get_settings()
+    if (
+        settings.persistence_provider == "postgres"
+        and settings.is_database_configured
+    ):
+        return PostgresLeadRepository(settings=settings)
     return MemoryLeadRepository()
 
 
@@ -110,4 +121,25 @@ def get_voice_orchestration_service() -> VoiceOrchestrationService:
         identity_service=get_identity_service(),
         question_service=QuestionService(),
         recommendation_service=get_recommendation_service(),
+    )
+
+
+@lru_cache
+def get_scheduled_call_service() -> ScheduledCallService:
+    """Return process-wide scheduled call store."""
+    return ScheduledCallService()
+
+
+def get_twilio_call_service() -> TwilioCallService:
+    """Return Twilio call helper."""
+    return TwilioCallService(settings=get_settings())
+
+
+def get_phone_call_orchestrator() -> PhoneCallOrchestrator:
+    """Return phone call product orchestrator."""
+    return PhoneCallOrchestrator(
+        identity_service=get_identity_service(),
+        lead_service=get_lead_service(),
+        twilio_call_service=get_twilio_call_service(),
+        scheduled_call_service=get_scheduled_call_service(),
     )

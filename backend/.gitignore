@@ -36,7 +36,10 @@ data/raw/*
 !data/raw/.gitkeep
 data/processed/*
 !data/processed/.gitkeep
+data/mock/processed_demo/
+data/mock/mock_affiliates_historical.json
 
 # Local dumps
 *.log
 *.sqlite3
+logs/

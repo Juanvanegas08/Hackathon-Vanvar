@@ -117,7 +117,9 @@ export const ConsentPage = () => {
           ¿Nos autorizas a utilizar esta información para personalizar tu orientación de vivienda?
         </h1>
         <p className="mt-4 text-[var(--color-muted)]">
-          Puedes continuar sin precargar datos. Este prototipo es una simulación.
+          <strong className="text-[var(--color-ink)]">Continuar</strong> retoma tu perfil
+          guardado. <strong className="text-[var(--color-ink)]">Empezar desde cero</strong>{' '}
+          borra en base de datos tu perfil, predisposición y recomendaciones previas.
         </p>
 
         {error && (
@@ -132,7 +134,7 @@ export const ConsentPage = () => {
             disabled={createMutation.isPending}
             onClick={() => createMutation.mutate(true)}
           >
-            Sí, continuar
+            Continuar donde me quedé
           </Button>
           <Button
             variant="secondary"
@@ -140,7 +142,7 @@ export const ConsentPage = () => {
             disabled={createMutation.isPending}
             onClick={() => createMutation.mutate(false)}
           >
-            Prefiero comenzar desde cero
+            Empezar desde cero
           </Button>
         </div>
 

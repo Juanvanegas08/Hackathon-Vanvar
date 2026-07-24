@@ -38,6 +38,9 @@ class OpenAIRealtimeProvider:
                 "Configura la clave en el servidor antes de iniciar voz."
             )
 
+        # lead_id is used only for local orchestration; OpenAI client_secrets
+        # rejects unknown session fields such as metadata.
+        _ = lead_id
         payload = {
             "session": {
                 "type": "realtime",
@@ -50,7 +53,6 @@ class OpenAIRealtimeProvider:
                         }
                     },
                 },
-                "metadata": {"lead_id": lead_id, "product": "casalista_voice"},
             }
         }
 
@@ -70,6 +72,11 @@ class OpenAIRealtimeProvider:
             ) from exc
 
         if response.status_code in {401, 403}:
+            logger.warning(
+                "OpenAI Realtime auth failed status=%s body=%s",
+                response.status_code,
+                response.text[:300],
+            )
             raise RealtimeServiceError(
                 "No fue posible autenticar el servicio de voz.",
                 code="realtime_unauthorized",
@@ -80,11 +87,21 @@ class OpenAIRealtimeProvider:
                 code="realtime_rate_limited",
             )
         if response.status_code >= 500:
+            logger.warning(
+                "OpenAI Realtime upstream error status=%s body=%s",
+                response.status_code,
+                response.text[:300],
+            )
             raise RealtimeServiceError(
                 "No fue posible iniciar la conversación de voz.",
                 code="realtime_upstream_error",
             )
         if response.status_code >= 400:
+            logger.warning(
+                "OpenAI Realtime client error status=%s body=%s",
+                response.status_code,
+                response.text[:300],
+            )
             raise RealtimeServiceError(
                 "No fue posible iniciar la conversación de voz.",
                 code="realtime_service_unavailable",

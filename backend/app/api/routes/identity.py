@@ -2,7 +2,7 @@
 
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Response, status
 
 from app.api.deps import get_identity_service, get_lead_service, get_settings_dep
 from app.core.config import Settings
@@ -24,10 +24,11 @@ router = APIRouter(tags=["Identidad"])
 @router.post(
     "/identity/lookup",
     response_model=IdentityLookupResponse,
-    summary="Consultar identidad simulada",
+    summary="Consultar identidad por documento",
     description=(
-        "Busca un documento en el servicio simulado de afiliación. "
-        "No crea un lead automáticamente. Solo para demostración."
+        "Busca primero en la base de datos por hash de documento. "
+        "Si no existe, consulta el servicio simulado de afiliación. "
+        "No crea un lead automáticamente."
     ),
 )
 def lookup_identity(
@@ -41,15 +42,18 @@ def lookup_identity(
 @router.post(
     "/leads/from-identity",
     response_model=LeadFromIdentityResponse,
-    status_code=status.HTTP_201_CREATED,
-    summary="Crear lead desde identidad simulada",
+    summary="Obtener o crear lead desde identificación",
     description=(
-        "Crea un lead a partir del mock de afiliación. "
-        "Sin consentimiento no se precarga información financiera."
+        "Si el documento ya existe en BD y data_consent=true, recupera el perfil. "
+        "Si data_consent=false sobre un perfil existente, reinicia desde cero "
+        "(borra datos de conversación, predisposición y recomendaciones). "
+        "Si no existe, crea el lead (mock de afiliación cuando aplique). "
+        "Sin consentimiento en alta nueva no se precarga información financiera."
     ),
 )
 def create_lead_from_identity(
     payload: LeadFromIdentityRequest,
+    response: Response,
     identity_service: IdentityService = Depends(get_identity_service),
     lead_service: LeadService = Depends(get_lead_service),
 ) -> LeadFromIdentityResponse:
@@ -58,12 +62,17 @@ def create_lead_from_identity(
         document_number=payload.document_number,
         data_consent=payload.data_consent,
     )
+    created = bool(context.get("created", True))
+    response.status_code = (
+        status.HTTP_201_CREATED if created else status.HTTP_200_OK
+    )
     next_question = lead_service.next_question(lead.id).next_question
     return LeadFromIdentityResponse(
         lead=LeadResponse.from_lead(lead),
         identity_context=context,
         next_question=next_question,
-        demo_mode=True,
+        demo_mode=bool(context.get("demo_mode", True)),
+        created=created,
     )
 
 

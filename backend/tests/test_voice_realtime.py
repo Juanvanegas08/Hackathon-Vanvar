@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from collections.abc import Iterator
 from typing import Any
 from uuid import uuid4
@@ -50,7 +51,7 @@ class FakeRealtimeProvider:
             client_secret=self.secret,
             expires_at=1_900_000_000,
             model="gpt-realtime-2.1",
-            voice="marin",
+            voice="coral",
             session_id="sess_test",
         )
 
@@ -63,7 +64,7 @@ def settings() -> Settings:
         OPENAI_API_KEY="sk-test-never-expose",
         OPENAI_REALTIME_ENABLED=True,
         OPENAI_REALTIME_MODEL="gpt-realtime-2.1",
-        OPENAI_REALTIME_VOICE="marin",
+        OPENAI_REALTIME_VOICE="coral",
     )
 
 
@@ -166,7 +167,7 @@ def test_client_secret_success(client: TestClient) -> None:
     body = response.json()
     assert body["client_secret"] == "ek_test_secret"
     assert body["model"] == "gpt-realtime-2.1"
-    assert body["voice"] == "marin"
+    assert body["voice"] == "coral"
     assert "sk-test" not in response.text
 
 
@@ -227,11 +228,13 @@ def test_openai_provider_parses_secret() -> None:
         OPENAI_API_KEY="sk-real-never-return",
         OPENAI_REALTIME_ENABLED=True,
         OPENAI_REALTIME_MODEL="gpt-realtime-2.1",
-        OPENAI_REALTIME_VOICE="marin",
+        OPENAI_REALTIME_VOICE="coral",
     )
 
     def handler(request: httpx.Request) -> httpx.Response:
         assert "sk-real-never-return" in request.headers["Authorization"]
+        body = json.loads(request.content.decode("utf-8"))
+        assert "metadata" not in body.get("session", {})
         return httpx.Response(
             200,
             json={

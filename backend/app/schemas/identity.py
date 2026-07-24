@@ -54,6 +54,7 @@ class LeadFromIdentityResponse(BaseModel):
     identity_context: dict[str, Any]
     next_question: NextQuestion | None = None
     demo_mode: bool = True
+    created: bool = True
 
 
 class FieldConfirmationItem(BaseModel):

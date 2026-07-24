@@ -1,5 +1,7 @@
 """FastAPI application entrypoint for CasaLista Voice."""
 
+import asyncio
+import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
@@ -9,6 +11,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import ValidationError
 
+from app.api.deps import get_phone_call_orchestrator
 from app.api.router import build_api_router
 from app.api.routes import health
 from app.core.config import get_settings
@@ -19,11 +22,38 @@ from app.core.exceptions import (
     ValidationBusinessError,
 )
 
+logger = logging.getLogger(__name__)
+
+
+async def _scheduled_call_worker(stop: asyncio.Event) -> None:
+    """Poll due scheduled calls and place outbound Twilio calls."""
+    settings = get_settings()
+    interval = max(5, int(settings.scheduled_call_poll_seconds or 30))
+    while not stop.is_set():
+        try:
+            if settings.is_twilio_ready:
+                orchestrator = get_phone_call_orchestrator()
+                claimed = orchestrator.process_due_scheduled_calls()
+                if claimed:
+                    logger.info("Processed %s due scheduled call(s)", len(claimed))
+        except Exception:  # noqa: BLE001
+            logger.exception("Scheduled call worker failed")
+        try:
+            await asyncio.wait_for(stop.wait(), timeout=interval)
+        except TimeoutError:
+            continue
+
 
 @asynccontextmanager
 async def lifespan(_: FastAPI) -> AsyncIterator[None]:
     """Application lifespan hook."""
-    yield
+    stop = asyncio.Event()
+    worker = asyncio.create_task(_scheduled_call_worker(stop))
+    try:
+        yield
+    finally:
+        stop.set()
+        await worker
 
 
 def create_app() -> FastAPI:

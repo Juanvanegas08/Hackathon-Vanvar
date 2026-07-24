@@ -27,6 +27,18 @@ def missing_pct(series: pd.Series) -> float:
     return round(float(series.isna().mean() * 100), 2)
 
 
+def _top_values(group: pd.DataFrame, column_candidates: tuple[str, ...], n: int = 5) -> list[str]:
+    for column in column_candidates:
+        if column not in group.columns:
+            continue
+        series = group[column].dropna().astype(str).str.strip()
+        series = series[series != ""]
+        if series.empty:
+            continue
+        return [str(v) for v in series.value_counts().head(n).index]
+    return []
+
+
 def build_profile_for_group(group: pd.DataFrame, project_name: str) -> dict[str, Any]:
     """Build one historical profile dictionary from a buyers subset."""
     total = int(len(group))
@@ -55,10 +67,17 @@ def build_profile_for_group(group: pd.DataFrame, project_name: str) -> dict[str,
             price_reliable = price_median <= HISTORICAL_PRICE_RELIABILITY_MAX_MEDIAN
 
     withdrawal = None
-    if "fecha_desistimiento_fecha" in group.columns:
+    if "desistio_normalizado" in group.columns:
+        known_desist = group["desistio_normalizado"].dropna()
+        if not known_desist.empty:
+            withdrawal = round(float(known_desist.astype(bool).mean() * 100), 2)
+    elif "fecha_desistimiento_fecha" in group.columns:
         withdrawal = round(float(group["fecha_desistimiento_fecha"].notna().mean() * 100), 2)
     elif "fecha_desistimiento" in group.columns:
-        withdrawal = round(float(group["fecha_desistimiento"].notna().mean() * 100), 2)
+        # Avoid treating Si/No strings as "present dates".
+        raw = group["fecha_desistimiento"]
+        parsed_dates = pd.to_datetime(raw, errors="coerce", dayfirst=True)
+        withdrawal = round(float(parsed_dates.notna().mean() * 100), 2)
 
     missing = {
         "estado_afiliacion": missing_pct(group.get("estado_afiliacion", pd.Series(dtype=object))),
@@ -75,6 +94,11 @@ def build_profile_for_group(group: pd.DataFrame, project_name: str) -> dict[str,
             group.get("vlr_vivienda_numerico", pd.Series(dtype=object))
         ),
     }
+
+    if "rango_edad_normalizado" in group.columns:
+        age_series = group["rango_edad_normalizado"]
+    else:
+        age_series = group.get("rango_edad", pd.Series(dtype=object))
 
     return {
         "project_name": project_name,
@@ -95,24 +119,14 @@ def build_profile_for_group(group: pd.DataFrame, project_name: str) -> dict[str,
             group.get("no_grupo_familar", pd.Series(dtype=object))
         ),
         "frequent_locations": [],
-        "frequent_financial_entities": [
-            str(v)
-            for v in group.get("ent_credito", pd.Series(dtype=object))
-            .dropna()
-            .astype(str)
-            .value_counts()
-            .head(5)
-            .index
-        ],
-        "frequent_companies": [
-            str(v)
-            for v in group.get("nombre_empresa_principal", pd.Series(dtype=object))
-            .dropna()
-            .astype(str)
-            .value_counts()
-            .head(5)
-            .index
-        ],
+        "frequent_financial_entities": _top_values(
+            group,
+            ("ent_credito", "entidad_financiera_compra", "entidad_financiera"),
+        ),
+        "frequent_companies": _top_values(
+            group,
+            ("nombre_empresa_principal", "empresa_foco"),
+        ),
         "enterprise_pyramid_distribution": distribution(
             group.get("piramide_nueva", pd.Series(dtype=object))
         ),
@@ -122,10 +136,11 @@ def build_profile_for_group(group: pd.DataFrame, project_name: str) -> dict[str,
         "historical_price_reliable": price_reliable,
         "withdrawal_percentage": withdrawal,
         "missing_data_percentage": missing,
-        "age_range_distribution": distribution(group.get("rango_edad", pd.Series(dtype=object))),
+        "age_range_distribution": distribution(age_series),
         "notes": [
             "El porcentaje de desistimiento es histórico y no predice comportamiento futuro.",
             "La categoría A/B/C no debe confundirse con el segmento Básico/Medio/Alto/Joven.",
+            "En el export del hackathon CATEGORIA/SEGMENTO vienen ofuscados (códigos).",
             "Género/edad/estrato no se usan para puntaje de compatibilidad.",
         ],
     }

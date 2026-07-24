@@ -1,30 +1,35 @@
 import type { PropsWithChildren } from 'react'
 import { Link } from 'react-router-dom'
-import { AmbientBackground } from '@/components/layout/AmbientBackground'
-import { Badge } from '@/components/ui/Badge'
 
 interface AppShellProps extends PropsWithChildren {
   showHeader?: boolean
 }
 
 export const AppShell = ({ children, showHeader = true }: AppShellProps) => (
-  <div className="relative min-h-screen overflow-hidden bg-[var(--color-bg)] text-[var(--color-ink)]">
-    <AmbientBackground />
+  <div className="relative min-h-screen overflow-x-hidden bg-[var(--color-bg)] text-[var(--color-ink)]">
     <div className="relative mx-auto min-h-screen max-w-7xl px-5 sm:px-8">
       {showHeader && (
-        <header className="flex items-center justify-between gap-4 py-6">
-          <Link to="/" className="font-display text-2xl font-bold tracking-tight text-[var(--color-blue)]">
-            CasaLista <span className="text-[var(--color-ink)]">Voice</span>
+        <header className="relative z-20 flex items-center justify-between gap-4 bg-transparent py-6">
+          <Link
+            to="/"
+            className="font-display text-2xl font-bold tracking-tight text-[var(--color-ink)]"
+          >
+            CasaLista <span className="font-semibold text-[var(--color-blue)]">Voice</span>
           </Link>
-          <div className="flex items-center gap-3">
-            <Badge>Experiencia demostrativa</Badge>
-            <Link
-              to="/demo"
-              className="text-sm font-medium text-[var(--color-muted)] hover:text-[var(--color-blue)]"
-            >
-              Modo demo
+          <nav className="flex items-center gap-5 text-sm font-medium text-[var(--color-muted)]">
+            <Link to="/advisor?mock=1&lead=mock-lead-laura" className="hover:text-[var(--color-ink)]">
+              Asesor
             </Link>
-          </div>
+            <Link to="/demo" className="hover:text-[var(--color-ink)]">
+              Escenarios
+            </Link>
+            <Link
+              to="/identification"
+              className="rounded-full bg-[var(--color-ink)] px-4 py-2 text-white hover:bg-[var(--color-blue)]"
+            >
+              Empezar
+            </Link>
+          </nav>
         </header>
       )}
       <main>{children}</main>
