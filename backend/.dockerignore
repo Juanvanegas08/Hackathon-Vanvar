@@ -1,0 +1,25 @@
+.git
+.venv
+venv
+env
+__pycache__
+**/__pycache__
+*.py[cod]
+.pytest_cache
+.mypy_cache
+.ruff_cache
+# .env SÍ se copia al build (misma ruta que en local: /app/.env).
+# No subas .env a git; solo debe existir en el host donde haces el build.
+.env.*
+!.env
+!.env.example
+logs
+*.log
+tests
+.pytest.ini
+pytest.ini
+README.md
+**/.DS_Store
+data/profiles/*
+!data/profiles/.gitkeep
+!data/profiles/profile_schema.example.json
