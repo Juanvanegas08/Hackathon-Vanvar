@@ -125,6 +125,26 @@ class Settings(BaseSettings):
         default=True,
         alias="PREFER_OPENAI_RECOMMENDATIONS",
     )
+    openai_phone_model: str = Field(
+        default="gpt-4.1-mini",
+        alias="OPENAI_PHONE_MODEL",
+    )
+
+    twilio_account_sid: str | None = Field(default=None, alias="TWILIO_ACCOUNT_SID")
+    twilio_auth_token: str | None = Field(default=None, alias="TWILIO_AUTH_TOKEN")
+    twilio_phone_number: str | None = Field(default=None, alias="TWILIO_PHONE_NUMBER")
+    twilio_public_base_url: str | None = Field(
+        default=None,
+        alias="TWILIO_PUBLIC_BASE_URL",
+    )
+    twilio_validate_signature: bool = Field(
+        default=True,
+        alias="TWILIO_VALIDATE_SIGNATURE",
+    )
+    scheduled_call_poll_seconds: int = Field(
+        default=30,
+        alias="SCHEDULED_CALL_POLL_SECONDS",
+    )
 
     database_enabled: bool = Field(default=False, alias="DATABASE_ENABLED")
     database_url: SecretStr | None = Field(default=None, alias="DATABASE_URL")
@@ -212,6 +232,17 @@ class Settings(BaseSettings):
     def is_openai_realtime_ready(self) -> bool:
         """Return True when Realtime voice can be started."""
         return bool(self.openai_realtime_enabled and self.openai_api_key)
+
+    @property
+    def is_twilio_ready(self) -> bool:
+        """Return True when outbound/inbound Twilio voice can run."""
+        return bool(
+            self.twilio_account_sid
+            and self.twilio_auth_token
+            and self.twilio_phone_number
+            and self.twilio_public_base_url
+            and self.openai_api_key
+        )
 
     @property
     def is_database_configured(self) -> bool:

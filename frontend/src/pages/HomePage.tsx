@@ -1,16 +1,86 @@
-import { useState } from 'react'
+import { useMutation } from '@tanstack/react-query'
+import { useMemo, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { motion } from 'framer-motion'
 import { MessageCircle, Phone } from 'lucide-react'
+import { requestPhoneCall } from '@/api/phone.api'
 import { BrochureShowcase } from '@/components/home/BrochureShowcase'
 import { AmbientBackground } from '@/components/layout/AmbientBackground'
 import { AppShell } from '@/components/layout/AppShell'
 import { Button } from '@/components/ui/Button'
 import { Modal } from '@/components/ui/Modal'
+import { TextField } from '@/components/ui/TextField'
+import { getErrorMessage } from '@/utils/errors'
+
+type CallMode = 'now' | 'schedule'
+
+const toLocalInputValue = (date: Date) => {
+  const pad = (n: number) => String(n).padStart(2, '0')
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`
+}
 
 export const HomePage = () => {
   const navigate = useNavigate()
   const [callModalOpen, setCallModalOpen] = useState(false)
+  const [mode, setMode] = useState<CallMode>('now')
+  const [phone, setPhone] = useState('')
+  const [documentType, setDocumentType] = useState<'CC' | 'CE' | 'PP' | 'NIT'>('CC')
+  const [documentNumber, setDocumentNumber] = useState('')
+  const [scheduledLocal, setScheduledLocal] = useState(() => {
+    const d = new Date(Date.now() + 15 * 60_000)
+    return toLocalInputValue(d)
+  })
+  const [consent, setConsent] = useState(false)
+  const [formError, setFormError] = useState<string | null>(null)
+  const [successMessage, setSuccessMessage] = useState<string | null>(null)
+
+  const minSchedule = useMemo(() => toLocalInputValue(new Date(Date.now() + 2 * 60_000)), [])
+
+  const callMutation = useMutation({
+    mutationFn: requestPhoneCall,
+    onSuccess: (result) => {
+      setFormError(null)
+      setSuccessMessage(result.message)
+    },
+    onError: (err) => {
+      setSuccessMessage(null)
+      setFormError(getErrorMessage(err))
+    },
+  })
+
+  const resetModal = () => {
+    setCallModalOpen(false)
+    setFormError(null)
+    setSuccessMessage(null)
+    callMutation.reset()
+  }
+
+  const submitCall = () => {
+    setFormError(null)
+    setSuccessMessage(null)
+    if (!phone.trim() || !documentNumber.trim()) {
+      setFormError('Completa teléfono y documento.')
+      return
+    }
+    if (!consent) {
+      setFormError('Debes aceptar el consentimiento de datos.')
+      return
+    }
+    const scheduledAt =
+      mode === 'schedule' ? new Date(scheduledLocal).toISOString() : undefined
+    if (mode === 'schedule' && Number.isNaN(Date.parse(scheduledLocal))) {
+      setFormError('La fecha programada no es válida.')
+      return
+    }
+    callMutation.mutate({
+      phone: phone.trim(),
+      mode,
+      scheduled_at: scheduledAt,
+      document_type: documentType,
+      document_number: documentNumber.trim(),
+      data_consent: true,
+    })
+  }
 
   return (
     <AppShell>
@@ -48,7 +118,11 @@ export const HomePage = () => {
               <Button
                 variant="secondary"
                 className="min-h-12 gap-2 px-6 text-base sm:min-h-14 sm:px-7 sm:text-lg"
-                onClick={() => setCallModalOpen(true)}
+                onClick={() => {
+                  setSuccessMessage(null)
+                  setFormError(null)
+                  setCallModalOpen(true)
+                }}
               >
                 <Phone size={18} aria-hidden /> Prefiero que me llamen
               </Button>
@@ -73,21 +147,116 @@ export const HomePage = () => {
         </Link>
       </footer>
 
-      <Modal
-        open={callModalOpen}
-        title="Te contactamos pronto"
-        onClose={() => setCallModalOpen(false)}
-      >
-        <p className="text-[var(--color-muted)]">
-          En esta versión puedes continuar por voz o texto. La llamada telefónica estará disponible
-          enseguida.
-        </p>
-        <div className="mt-6 flex flex-wrap gap-2">
-          <Button onClick={() => navigate('/identification')}>Continuar ahora</Button>
-          <Button variant="secondary" onClick={() => setCallModalOpen(false)}>
-            Cerrar
-          </Button>
-        </div>
+      <Modal open={callModalOpen} title="Que Laura te llame" onClose={resetModal}>
+        {successMessage ? (
+          <div className="space-y-4">
+            <p className="text-[var(--color-ink)]">{successMessage}</p>
+            <p className="text-sm text-[var(--color-muted)]">
+              Contesta desde el número que registraste. Si tu cuenta Twilio sigue en trial, el
+              destino debe estar verificado.
+            </p>
+            <Button onClick={resetModal}>Listo</Button>
+          </div>
+        ) : (
+          <div className="space-y-4">
+            <p className="text-sm text-[var(--color-muted)]">
+              Misma asesora Laura y el mismo perfil que en la web. Elige si te llamamos ahora o en
+              otro momento.
+            </p>
+
+            <div className="flex flex-wrap gap-2">
+              <Button
+                type="button"
+                variant={mode === 'now' ? 'primary' : 'secondary'}
+                onClick={() => setMode('now')}
+              >
+                Ahora
+              </Button>
+              <Button
+                type="button"
+                variant={mode === 'schedule' ? 'primary' : 'secondary'}
+                onClick={() => setMode('schedule')}
+              >
+                Programar
+              </Button>
+            </div>
+
+            <TextField
+              label="Celular"
+              name="phone"
+              value={phone}
+              onChange={(e) => setPhone(e.target.value)}
+              placeholder="3001234567 o +573001234567"
+              autoComplete="tel"
+            />
+
+            <div className="grid gap-3 sm:grid-cols-[7rem_1fr]">
+              <label className="block text-sm font-medium text-[var(--color-ink)]">
+                Documento
+                <select
+                  className="mt-1 w-full rounded-xl border border-[var(--color-line)] bg-white px-3 py-2"
+                  value={documentType}
+                  onChange={(e) =>
+                    setDocumentType(e.target.value as 'CC' | 'CE' | 'PP' | 'NIT')
+                  }
+                >
+                  <option value="CC">CC</option>
+                  <option value="CE">CE</option>
+                  <option value="PP">PP</option>
+                  <option value="NIT">NIT</option>
+                </select>
+              </label>
+              <TextField
+                label="Número"
+                name="document_number"
+                value={documentNumber}
+                onChange={(e) => setDocumentNumber(e.target.value)}
+                placeholder="Número de documento"
+              />
+            </div>
+
+            {mode === 'schedule' && (
+              <label className="block text-sm font-medium text-[var(--color-ink)]">
+                Fecha y hora
+                <input
+                  type="datetime-local"
+                  className="mt-1 w-full rounded-xl border border-[var(--color-line)] bg-white px-3 py-2"
+                  min={minSchedule}
+                  value={scheduledLocal}
+                  onChange={(e) => setScheduledLocal(e.target.value)}
+                />
+              </label>
+            )}
+
+            <label className="flex items-start gap-3 text-sm text-[var(--color-muted)]">
+              <input
+                type="checkbox"
+                className="mt-1"
+                checked={consent}
+                onChange={(e) => setConsent(e.target.checked)}
+              />
+              <span>
+                Autorizo el tratamiento de mis datos para orientación de vivienda y contacto
+                telefónico con Laura (CasaLista / Colsubsidio).
+              </span>
+            </label>
+
+            {formError && <p className="text-sm text-red-600">{formError}</p>}
+
+            <div className="flex flex-wrap gap-2 pt-2">
+              <Button onClick={submitCall} disabled={callMutation.isPending}>
+                {callMutation.isPending
+                  ? 'Enviando…'
+                  : mode === 'now'
+                    ? 'Llamarme ahora'
+                    : 'Programar llamada'}
+              </Button>
+              <Button variant="secondary" onClick={resetModal}>
+                Cancelar
+              </Button>
+            </div>
+          </div>
+        )}
       </Modal>
     </AppShell>
   )
