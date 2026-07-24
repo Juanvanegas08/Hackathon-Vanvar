@@ -31,10 +31,17 @@ def normalize_phone(value: str, *, default_region: str = "57") -> str:
     if len(digits) == 11 and digits.startswith("1"):
         return f"+{digits}"
 
+    # Colombian landline-style 10 digits starting with 60x area codes
+    if len(digits) == 10 and digits.startswith("6"):
+        return f"+{default_region}{digits}"
+
     if len(digits) >= 10:
         return f"+{digits}"
 
-    raise ValueError("El teléfono debe incluir código de país o ser un móvil colombiano de 10 dígitos")
+    raise ValueError(
+        "Teléfono inválido. Usa un móvil colombiano de 10 dígitos "
+        "(ej. 3001234567) o formato internacional (ej. +573001234567)."
+    )
 
 
 def phones_match(left: str | None, right: str | None) -> bool:

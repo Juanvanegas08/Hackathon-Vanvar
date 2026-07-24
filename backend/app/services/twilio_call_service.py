@@ -23,11 +23,22 @@ class TwilioCallService:
 
     def _require_ready(self) -> Settings:
         settings = self._settings
-        if not settings.is_twilio_ready:
+        missing: list[str] = []
+        if not settings.twilio_account_sid:
+            missing.append("TWILIO_ACCOUNT_SID")
+        if not settings.twilio_auth_token:
+            missing.append("TWILIO_AUTH_TOKEN")
+        if not settings.twilio_phone_number:
+            missing.append("TWILIO_PHONE_NUMBER")
+        if not (settings.twilio_public_base_url or "").strip():
+            missing.append("TWILIO_PUBLIC_BASE_URL")
+        if not settings.openai_api_key:
+            missing.append("OPENAI_API_KEY")
+        if missing:
             raise ConfigurationError(
-                "Twilio no está configurado. Define TWILIO_ACCOUNT_SID, "
-                "TWILIO_AUTH_TOKEN, TWILIO_PHONE_NUMBER, TWILIO_PUBLIC_BASE_URL "
-                "y OPENAI_API_KEY."
+                "Twilio no está listo. Falta configurar: "
+                + ", ".join(missing)
+                + ". En local usa un tunnel (ngrok) y pon la URL HTTPS en TWILIO_PUBLIC_BASE_URL."
             )
         return settings
 

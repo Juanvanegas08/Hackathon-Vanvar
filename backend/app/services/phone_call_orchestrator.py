@@ -46,7 +46,11 @@ class PhoneCallOrchestrator:
                 "Se requiere consentimiento de datos para iniciar la llamada."
             )
 
-        e164 = normalize_phone(phone)
+        try:
+            e164 = normalize_phone(phone)
+        except ValueError as exc:
+            raise ValidationBusinessError(str(exc)) from exc
+
         lead, identity_context = self._identity.create_lead_from_identity(
             document_type=document_type,
             document_number=document_number,
