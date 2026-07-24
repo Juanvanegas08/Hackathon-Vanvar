@@ -56,9 +56,34 @@ export const BrochureShowcase = () => {
                 {current.proyecto}
               </h3>
               <p className="mt-4 max-w-md text-[var(--color-muted)]">
-                Mira la portada del proyecto y abre el brochure digital para explorar planos y
-                tipologías.
+                {current.resumen ||
+                  'Mira la portada del proyecto y abre el brochure digital para explorar planos y tipologías.'}
               </p>
+              {(current.precioDesde ||
+                current.fechaEntrega ||
+                (current.beneficios && current.beneficios.length > 0) ||
+                current.tipologiasResumen) && (
+                <ul className="mt-4 space-y-1.5 text-sm text-[var(--color-ink)]">
+                  {(current.precioDesde || current.precioHasta) && (
+                    <li>
+                      Precio orientativo:{' '}
+                      {current.precioDesde
+                        ? `desde $${Math.round(current.precioDesde).toLocaleString('es-CO')}`
+                        : ''}
+                      {current.precioHasta
+                        ? `${current.precioDesde ? ' · ' : ''}hasta $${Math.round(current.precioHasta).toLocaleString('es-CO')}`
+                        : ''}
+                    </li>
+                  )}
+                  {current.fechaEntrega && <li>Entrega: {current.fechaEntrega}</li>}
+                  {current.tipologiasResumen && (
+                    <li>Tipologías: {current.tipologiasResumen}</li>
+                  )}
+                  {current.beneficios && current.beneficios.length > 0 && (
+                    <li>Beneficios: {current.beneficios.slice(0, 3).join(' · ')}</li>
+                  )}
+                </ul>
+              )}
               <div className="mt-8 flex flex-wrap items-center gap-3">
                 <a href={current.url} target="_blank" rel="noreferrer">
                   <Button className="min-h-12 gap-2 px-6">

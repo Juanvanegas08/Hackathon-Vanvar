@@ -8,4 +8,10 @@ export const listLeads = async () => (await apiClient.get<LeadResponse[]>(prefix
 export const updateLead = async (leadId: string, payload: LeadUpdate) => (await apiClient.patch<LeadResponse>(`${prefix}/${leadId}`, payload)).data
 export const getNextQuestion = async (leadId: string) => (await apiClient.get<NextQuestionResponse>(`${prefix}/${leadId}/next-question`)).data
 export const evaluateLead = async (leadId: string) => (await apiClient.post<ReadinessResponse>(`${prefix}/${leadId}/evaluate`)).data
-export const getSummary = async (leadId: string) => (await apiClient.get<AdvisorSummaryResponse>(`${prefix}/${leadId}/summary`)).data
+export const getSummary = async (leadId: string) =>
+  (
+    await apiClient.get<AdvisorSummaryResponse>(`${prefix}/${leadId}/summary`, {
+      // Summary también invoca el recomendador OpenAI.
+      timeout: 90_000,
+    })
+  ).data

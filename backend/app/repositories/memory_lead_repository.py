@@ -71,6 +71,10 @@ class MemoryLeadRepository:
             return self.create(lead)
         return self.update(lead)
 
+    def reset_profile(self, lead: Lead) -> Lead:
+        """Replace the stored lead with a wiped profile (memory has no recs table)."""
+        return self.save_profile(lead)
+
     def clear(self) -> None:
         """Remove all leads (intended for tests)."""
         with self._lock:

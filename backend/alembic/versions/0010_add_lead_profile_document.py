@@ -1,7 +1,7 @@
-"""0009 add lead profile document JSONB.
+"""0010 add lead profile document JSONB.
 
-Revision ID: 0009_lead_profile_document
-Revises: 0008_analytics_views
+Revision ID: 0010_lead_profile_document
+Revises: 0009_buyer_person_link
 Create Date: 2026-07-23
 """
 
@@ -13,8 +13,8 @@ import sqlalchemy as sa
 from alembic import op
 from sqlalchemy.dialects import postgresql
 
-revision: str = "0009_lead_profile_document"
-down_revision: str | None = "0008_analytics_views"
+revision: str = "0010_lead_profile_document"
+down_revision: str | None = "0009_buyer_person_link"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 

@@ -93,7 +93,6 @@ def test_openai_recommendation_maps_reason_and_spoken(tmp_path) -> None:
         settings=Settings(
             PREFER_OPENAI_RECOMMENDATIONS=True,
             OPENAI_API_KEY="test",
-            LEAD_PROFILES_PATH=str(tmp_path),
             PROJECT_ALIASES_PATH=str(tmp_path / "missing.json"),
         ),
         openai_provider=provider,
@@ -104,4 +103,4 @@ def test_openai_recommendation_maps_reason_and_spoken(tmp_path) -> None:
     assert result.spoken_summary and "INARI" in result.spoken_summary
     assert result.recommended_projects[0].reason
     assert result.recommended_projects[0].brochure_url
-    assert result.profile_json_path is not None
+    assert result.profile_json_path is None

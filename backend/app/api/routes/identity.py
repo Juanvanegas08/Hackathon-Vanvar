@@ -44,9 +44,11 @@ def lookup_identity(
     response_model=LeadFromIdentityResponse,
     summary="Obtener o crear lead desde identificación",
     description=(
-        "Si el documento ya existe en BD, recupera su perfil. "
-        "Si no existe, crea el lead desde cero (mock de afiliación cuando aplique). "
-        "Sin consentimiento no se precarga información financiera."
+        "Si el documento ya existe en BD y data_consent=true, recupera el perfil. "
+        "Si data_consent=false sobre un perfil existente, reinicia desde cero "
+        "(borra datos de conversación, predisposición y recomendaciones). "
+        "Si no existe, crea el lead (mock de afiliación cuando aplique). "
+        "Sin consentimiento en alta nueva no se precarga información financiera."
     ),
 )
 def create_lead_from_identity(

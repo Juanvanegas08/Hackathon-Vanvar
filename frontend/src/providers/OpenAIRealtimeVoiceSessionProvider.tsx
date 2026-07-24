@@ -60,6 +60,7 @@ export const OpenAIRealtimeVoiceSessionProvider = ({ children }: PropsWithChildr
   const clientSecretRef = useRef<string | null>(null)
   const completionPathRef = useRef<string | null>(null)
   const completionTimerRef = useRef<number | null>(null)
+  const closingSpeechStartedRef = useRef(false)
   const onNavigateRef = useRef<((path: string) => void) | null>(null)
   const submitHandlerRef = useRef<((text: string) => Promise<void>) | null>(null)
 
@@ -82,6 +83,8 @@ export const OpenAIRealtimeVoiceSessionProvider = ({ children }: PropsWithChildr
       audioElementRef.current = null
     }
     clientSecretRef.current = null
+    completionPathRef.current = null
+    closingSpeechStartedRef.current = false
     setIsConnected(false)
     setIsMuted(false)
   }, [])
@@ -100,13 +103,17 @@ export const OpenAIRealtimeVoiceSessionProvider = ({ children }: PropsWithChildr
 
   const scheduleNavigation = useCallback((path: string) => {
     completionPathRef.current = path
+    closingSpeechStartedRef.current = false
     if (completionTimerRef.current) window.clearTimeout(completionTimerRef.current)
+    // Fallback si por alguna razón no llega audio_stopped tras el cierre.
     completionTimerRef.current = window.setTimeout(() => {
       void cleanup().then(() => {
         setVoiceState('completed')
         onNavigateRef.current?.(path)
+        completionPathRef.current = null
+        closingSpeechStartedRef.current = false
       })
-    }, 3500)
+    }, 28_000)
   }, [cleanup])
 
   const startSession = useCallback(async (leadId?: string) => {
@@ -163,7 +170,6 @@ export const OpenAIRealtimeVoiceSessionProvider = ({ children }: PropsWithChildr
         displayName: context.display_name,
         voice: secretResponse.voice,
         onProfileCompleted: (path) => {
-          setVoiceState('completed')
           scheduleNavigation(path)
         },
       })
@@ -174,17 +180,29 @@ export const OpenAIRealtimeVoiceSessionProvider = ({ children }: PropsWithChildr
       })
       sessionRef.current = session
 
-      session.on('audio_start', () => setVoiceState('speaking'))
-      session.on('audio_stopped', () => {
+      session.on('audio_start', () => {
+        setVoiceState('speaking')
+        // Solo contamos el speech DE CIERRE (después de armar la navegación).
         if (completionPathRef.current) {
+          closingSpeechStartedRef.current = true
+        }
+      })
+      session.on('audio_stopped', () => {
+        if (completionPathRef.current && closingSpeechStartedRef.current) {
+          if (completionTimerRef.current) {
+            window.clearTimeout(completionTimerRef.current)
+            completionTimerRef.current = null
+          }
+          const path = completionPathRef.current
+          completionPathRef.current = null
+          closingSpeechStartedRef.current = false
           void cleanup().then(() => {
             setVoiceState('completed')
-            onNavigateRef.current?.(completionPathRef.current!)
-            completionPathRef.current = null
+            onNavigateRef.current?.(path)
           })
           return
         }
-        setVoiceState('listening')
+        setVoiceState(completionPathRef.current ? 'thinking' : 'listening')
       })
       session.on('audio_interrupted', () => setVoiceState('listening'))
       session.on('agent_tool_start', () => setVoiceState('thinking'))

@@ -28,7 +28,7 @@ describe('Realtime client secret API', () => {
       data: {
         client_secret: 'ek_test',
         model: 'gpt-realtime-2.1',
-        voice: 'marin',
+        voice: 'coral',
         expires_at: 1900000000,
       },
     })

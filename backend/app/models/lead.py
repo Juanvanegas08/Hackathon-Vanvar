@@ -62,6 +62,17 @@ class CreditSituation(StrEnum):
     DESCONOCIDA = "desconocida"
 
 
+class EngagementLabel(StrEnum):
+    """Voice/LLM classification of user predisposition during the conversation."""
+
+    INTERESADO = "interesado"
+    INDECISO = "indeciso"
+    MOLESTO = "molesto"
+    TROLLEANDO = "trolleando"
+    OCUPADO = "ocupado"
+    DESCONOCIDO = "desconocido"
+
+
 class QuestionFieldType(StrEnum):
     """Supported answer types for profiling questions."""
 
@@ -166,6 +177,10 @@ class Lead(BaseModel):
     data_consent_at: datetime | None = None
     field_metadata: dict[str, FieldProvenance] = Field(default_factory=dict)
     demo_mode: bool = False
+    engagement_label: EngagementLabel | None = None
+    engagement_score: int | None = Field(default=None, ge=0, le=100)
+    engagement_reason: str | None = None
+    engagement_updated_at: datetime | None = None
 
     @field_validator(
         "salario_mensual",
@@ -203,7 +218,32 @@ class Lead(BaseModel):
         if not updates:
             return self
         updates["fecha_actualizacion"] = _utcnow()
-        return self.model_copy(update=updates)
+        # Re-validate so voice/text updates cannot leave the lead in an
+        # unserializable state (e.g. free-text enums).
+        merged = {**self.model_dump(), **updates}
+        return type(self).model_validate(merged)
+
+    def reset_for_fresh_start(self) -> "Lead":
+        """Wipe conversation/profile data; keep document identity and lead id."""
+        return Lead(
+            id=self.id,
+            document_type=self.document_type,
+            document_number=self.document_number,
+            demo_mode=bool(self.demo_mode),
+            fecha_creacion=self.fecha_creacion,
+            fecha_actualizacion=_utcnow(),
+            estado_lead=LeadStatus.NUEVO,
+            known_lead=False,
+            identity_status=IdentityStatus.NEW_LEAD,
+            identity_verified=False,
+            data_consent=False,
+            data_consent_at=None,
+            consentimiento=None,
+            prefilled_fields=[],
+            fields_to_confirm=[],
+            field_metadata={},
+            canal_origen=CanalOrigen.DESCONOCIDO,
+        )
 
     def is_field_confirmed(self, field: str) -> bool:
         meta = self.field_metadata.get(field)

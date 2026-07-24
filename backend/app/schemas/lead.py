@@ -11,6 +11,7 @@ from app.models.lead import (
     CreditSituation,
     DataSource,
     DocumentType,
+    EngagementLabel,
     FieldProvenance,
     IdentityStatus,
     Lead,
@@ -167,6 +168,10 @@ class LeadResponse(BaseModel):
     data_consent_at: datetime | None = None
     field_metadata: dict[str, FieldProvenance] = Field(default_factory=dict)
     demo_mode: bool = False
+    engagement_label: EngagementLabel | None = None
+    engagement_score: int | None = None
+    engagement_reason: str | None = None
+    engagement_updated_at: datetime | None = None
 
     @classmethod
     def from_lead(cls, lead: Lead) -> "LeadResponse":

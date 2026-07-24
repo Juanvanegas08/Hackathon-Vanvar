@@ -35,3 +35,6 @@ class LeadRepository(Protocol):
 
     def save_profile(self, lead: Lead) -> Lead:
         """Persist the completed/updated profile for a lead."""
+
+    def reset_profile(self, lead: Lead) -> Lead:
+        """Persist a wiped profile and clear related recommendation artifacts."""

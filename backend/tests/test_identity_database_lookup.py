@@ -47,6 +47,55 @@ def test_create_from_identity_reuses_existing_profile() -> None:
     assert second.ahorro == 15_000_000
 
 
+def test_create_from_identity_without_consent_resets_existing_profile() -> None:
+    repo = MemoryLeadRepository()
+    settings = Settings(
+        SMMLV=1_000_000,
+        MOCK_AFFILIATES_PATH="data/mock/mock_affiliates.json",
+        PERSISTENCE_PROVIDER="memory",
+        DATABASE_ENABLED=False,
+    )
+    service = IdentityService(
+        repository=repo,
+        provider=MockAffiliationLookupProvider(settings=settings),
+    )
+
+    first, _ = service.create_lead_from_identity(
+        document_type="CC",
+        document_number="1000000001",
+        data_consent=True,
+    )
+    first = first.apply_partial_update(
+        {
+            "ubicacion_deseada": "Chía",
+            "ahorro": 15_000_000,
+            "ingreso_hogar": 4_000_000,
+            "engagement_label": "interesado",
+            "engagement_score": 88,
+            "engagement_reason": "Muy colaborador",
+            "estado_lead": LeadStatus.LISTO_PARA_ASESOR,
+        }
+    )
+    repo.save_profile(first)
+
+    wiped, ctx = service.create_lead_from_identity(
+        document_type="CC",
+        document_number="1000000001",
+        data_consent=False,
+    )
+    assert ctx["reset"] is True
+    assert ctx["profile_source"] == "reset"
+    assert wiped.id == first.id
+    assert wiped.ubicacion_deseada is None
+    assert wiped.ahorro is None
+    assert wiped.ingreso_hogar is None
+    assert wiped.engagement_label is None
+    assert wiped.engagement_score is None
+    assert wiped.engagement_reason is None
+    assert wiped.estado_lead == LeadStatus.NUEVO
+    assert wiped.data_consent is False
+
+
 def test_lookup_prefers_stored_profile() -> None:
     repo = MemoryLeadRepository()
     lead = Lead(

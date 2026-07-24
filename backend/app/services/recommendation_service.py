@@ -80,12 +80,8 @@ class RecommendationService:
         profile_path: str | None = None
         profile_document: dict[str, Any] | None = None
         if persist_profile:
-            try:
-                saved = self._profile_persistence.save_lead_profile(lead)
-                profile_path = str(saved)
-                profile_document = self._profile_persistence.build_document(lead)
-            except OSError:
-                logger.warning("No se pudo persistir el perfil del lead %s", lead.id)
+            # Document is for OpenAI / DB payload only — no local JSON files.
+            profile_document = self._profile_persistence.build_document(lead)
 
         if not self._has_minimum_information(lead):
             return RecommendationResult(
@@ -299,13 +295,23 @@ class RecommendationService:
         if not spoken and top:
             best = top[0]
             spoken = (
-                f"Te recomiendo el proyecto {best.project_name}"
+                "Según la charla que tuve contigo, y después de revisar "
+                "los proyectos del catálogo, mi recomendación es "
+                f"{best.project_name}"
                 + (f" porque {best.reason}" if best.reason else "")
                 + (
-                    f". Puedes ver el brochure aquí: {best.brochure_url}."
+                    f". Puedes revisar el brochure en este enlace: {best.brochure_url}."
                     if best.brochure_url
                     else "."
                 )
+                + " Esto es orientativo y no constituye una aprobación de crédito."
+            )
+        elif spoken and not spoken.lower().startswith("según la charla"):
+            spoken = (
+                "Según la charla que tuve contigo, y después de revisar "
+                "los proyectos del catálogo, "
+                + spoken[0].lower()
+                + spoken[1:]
             )
 
         status = (
@@ -374,11 +380,14 @@ class RecommendationService:
         if top:
             best = top[0]
             spoken = (
-                f"Según tu perfil, la mejor opción es {best.project_name}"
+                "Según la charla que tuve contigo, y después de revisar "
+                f"los proyectos del catálogo, mi recomendación es {best.project_name}"
                 + (f" porque {best.reason}" if best.reason else "")
             )
             if best.brochure_url:
-                spoken += f". Aquí tienes el brochure: {best.brochure_url}."
+                spoken += (
+                    f". Puedes revisar el brochure en este enlace: {best.brochure_url}."
+                )
             if len(top) > 1:
                 extras = []
                 for item in top[1:]:
@@ -387,6 +396,10 @@ class RecommendationService:
                         + (f" ({item.reason})" if item.reason else "")
                     )
                 spoken += " También te pueden interesar: " + "; ".join(extras) + "."
+            spoken += (
+                " Recuerda que esto es orientativo y no constituye "
+                "una aprobación de crédito."
+            )
 
         return RecommendationResult(
             lead_id=lead.id,

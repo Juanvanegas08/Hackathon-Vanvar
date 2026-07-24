@@ -94,7 +94,7 @@ class Settings(BaseSettings):
         alias="OPENAI_REALTIME_MODEL",
     )
     openai_realtime_voice: str = Field(
-        default="marin",
+        default="coral",
         alias="OPENAI_REALTIME_VOICE",
     )
     openai_realtime_transcription_model: str = Field(
@@ -106,7 +106,7 @@ class Settings(BaseSettings):
         alias="OPENAI_REALTIME_ENABLED",
     )
     openai_request_timeout_seconds: float = Field(
-        default=20,
+        default=60,
         alias="OPENAI_REQUEST_TIMEOUT_SECONDS",
     )
     openai_recommender_enabled: bool = Field(
@@ -116,10 +116,6 @@ class Settings(BaseSettings):
     openai_recommender_model: str = Field(
         default="gpt-4.1-mini",
         alias="OPENAI_RECOMMENDER_MODEL",
-    )
-    lead_profiles_path: str = Field(
-        default="./data/profiles",
-        alias="LEAD_PROFILES_PATH",
     )
     prefer_openai_recommendations: bool = Field(
         default=True,

@@ -2,18 +2,31 @@
 
 from __future__ import annotations
 
+import re
 from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID
 
+from pydantic import ValidationError
+
 from app.core.exceptions import ValidationBusinessError
-from app.models.lead import DataSource, FieldProvenance, Lead, QuestionFieldType
+from app.models.lead import (
+    CreditSituation,
+    DataSource,
+    EngagementLabel,
+    FieldProvenance,
+    Lead,
+    PurchaseTimeline,
+    QuestionFieldType,
+)
 from app.schemas.evaluation import NextQuestion
 from app.schemas.realtime import (
     VoiceAnswerRequest,
     VoiceAnswerResponse,
     VoiceCompleteResponse,
     VoiceContextResponse,
+    VoiceEngagementRequest,
+    VoiceEngagementResponse,
 )
 from app.services.identity_service import IdentityService
 from app.services.lead_service import LeadService
@@ -37,6 +50,53 @@ BOOLEAN_FIELDS = {
     "tiene_vivienda",
     "consentimiento",
     "data_consent",
+}
+
+# Natural-language aliases → canonical enum values for voice answers.
+CREDIT_SITUATION_ALIASES: dict[str, CreditSituation] = {
+    "sin_reportes": CreditSituation.SIN_REPORTES,
+    "sin reportes": CreditSituation.SIN_REPORTES,
+    "sin reporte": CreditSituation.SIN_REPORTES,
+    "limpio": CreditSituation.SIN_REPORTES,
+    "al_dia": CreditSituation.AL_DIA,
+    "al dia": CreditSituation.AL_DIA,
+    "al día": CreditSituation.AL_DIA,
+    "atrasos_menores": CreditSituation.ATRASOS_MENORES,
+    "atrasos menores": CreditSituation.ATRASOS_MENORES,
+    "atrasos_mayores": CreditSituation.ATRASOS_MAYORES,
+    "atrasos mayores": CreditSituation.ATRASOS_MAYORES,
+    "en_proceso_normalizacion": CreditSituation.EN_PROCESO_NORMALIZACION,
+    "en normalizacion": CreditSituation.EN_PROCESO_NORMALIZACION,
+    "en normalización": CreditSituation.EN_PROCESO_NORMALIZACION,
+    "desconocida": CreditSituation.DESCONOCIDA,
+    "no se": CreditSituation.DESCONOCIDA,
+    "no sé": CreditSituation.DESCONOCIDA,
+    "no estoy seguro": CreditSituation.DESCONOCIDA,
+    "no estoy segura": CreditSituation.DESCONOCIDA,
+}
+
+PURCHASE_TIMELINE_ALIASES: dict[str, PurchaseTimeline] = {
+    "inmediato": PurchaseTimeline.INMEDIATO,
+    "de inmediato": PurchaseTimeline.INMEDIATO,
+    "ya": PurchaseTimeline.INMEDIATO,
+    "3_meses": PurchaseTimeline.TRES_MESES,
+    "3 meses": PurchaseTimeline.TRES_MESES,
+    "tres meses": PurchaseTimeline.TRES_MESES,
+    "6_meses": PurchaseTimeline.SEIS_MESES,
+    "6 meses": PurchaseTimeline.SEIS_MESES,
+    "seis meses": PurchaseTimeline.SEIS_MESES,
+    "12_meses": PurchaseTimeline.DOCE_MESES,
+    "12 meses": PurchaseTimeline.DOCE_MESES,
+    "doce meses": PurchaseTimeline.DOCE_MESES,
+    "un ano": PurchaseTimeline.DOCE_MESES,
+    "un año": PurchaseTimeline.DOCE_MESES,
+    "mas_de_un_ano": PurchaseTimeline.MAS_DE_UN_ANO,
+    "mas de un ano": PurchaseTimeline.MAS_DE_UN_ANO,
+    "más de un año": PurchaseTimeline.MAS_DE_UN_ANO,
+    "no_definido": PurchaseTimeline.NO_DEFINIDO,
+    "no definido": PurchaseTimeline.NO_DEFINIDO,
+    "aun no": PurchaseTimeline.NO_DEFINIDO,
+    "aún no": PurchaseTimeline.NO_DEFINIDO,
 }
 
 
@@ -86,6 +146,38 @@ class VoiceOrchestrationService:
             demo_mode=bool(lead.demo_mode),
         )
 
+    def report_engagement(
+        self,
+        lead_id: UUID,
+        payload: VoiceEngagementRequest,
+    ) -> VoiceEngagementResponse:
+        label = EngagementLabel(payload.label)
+        saved = self._leads.apply_lead_updates(
+            lead_id,
+            {
+                "engagement_label": label,
+                "engagement_score": payload.score,
+                "engagement_reason": (payload.reason or "").strip() or None,
+                "engagement_updated_at": datetime.now(UTC),
+                "fecha_actualizacion": datetime.now(UTC),
+            },
+        )
+        return VoiceEngagementResponse(
+            accepted=True,
+            engagement_label=(
+                saved.engagement_label.value
+                if saved.engagement_label is not None
+                else label.value
+            ),
+            engagement_score=saved.engagement_score,
+            engagement_reason=saved.engagement_reason,
+            engagement_updated_at=(
+                saved.engagement_updated_at.isoformat()
+                if saved.engagement_updated_at
+                else None
+            ),
+        )
+
     def submit_answer(
         self,
         lead_id: UUID,
@@ -130,6 +222,30 @@ class VoiceOrchestrationService:
                 progress=compute_profile_progress(lead),
             )
 
+        if self._looks_like_non_answer_transcript(payload.raw_transcript):
+            is_question = self._looks_like_user_question(payload.raw_transcript)
+            return VoiceAnswerResponse(
+                accepted=False,
+                clarification_required=True,
+                assistant_guidance=(
+                    "El usuario está preguntando o pidiendo aclaración. "
+                    "Responde primero con sustancia a su duda (2–5 frases) "
+                    "y solo después retoma la pregunta activa "
+                    f"sobre {expected.field}."
+                    if is_question
+                    else (
+                        "Eso no responde la pregunta actual. "
+                        "Aclara breve si hace falta y vuelve a preguntar "
+                        f"sobre {expected.field} hasta obtener una respuesta válida."
+                    )
+                ),
+                validation_message=(
+                    "El transcript no parece una respuesta válida a la pregunta activa."
+                ),
+                next_question=expected,
+                progress=compute_profile_progress(lead),
+            )
+
         try:
             if expected.type == QuestionFieldType.CONFIRMATION:
                 lead = self._apply_confirmation(lead, expected, payload)
@@ -150,7 +266,7 @@ class VoiceOrchestrationService:
         progress = compute_profile_progress(refreshed)
         completed = bool(following.completed)
         guidance = (
-            "Agradece brevemente y finaliza el perfilamiento."
+            "Cierra con naturalidad y finaliza el perfilamiento."
             if completed
             else self._guidance_for(following.next_question)
         )
@@ -183,41 +299,52 @@ class VoiceOrchestrationService:
         engine: str | None = None
         if self._recommendations is not None:
             refreshed = self._leads.get_lead(lead_id)
-            recommendations = self._recommendations.recommend_for_lead(
-                refreshed,
-                limit=3,
-                persist_profile=True,
-                brochure_only=True,
-            )
-            recommendations_count = len(recommendations.recommended_projects)
-            spoken_summary = recommendations.spoken_summary
-            profile_json_path = recommendations.profile_json_path
-            engine = recommendations.engine
-            recommended_projects = [
-                {
-                    "project_name": item.project_name,
-                    "reason": item.reason,
-                    "probability": item.probability,
-                    "compatibility_score": item.compatibility_score,
-                    "brochure_url": item.brochure_url,
-                    "rank": item.rank,
-                }
-                for item in recommendations.recommended_projects
-            ]
-            if recommendations.recommended_projects:
-                first = recommendations.recommended_projects[0]
-                top_project = {
-                    "id": first.canonical_project_id,
-                    "name": first.project_name,
-                    "reason": first.reason or "",
-                    "brochure_url": first.brochure_url or "",
-                }
+            try:
+                recommendations = self._recommendations.recommend_for_lead(
+                    refreshed,
+                    limit=3,
+                    persist_profile=True,
+                    brochure_only=True,
+                )
+                recommendations_count = len(recommendations.recommended_projects)
+                spoken_summary = recommendations.spoken_summary
+                profile_json_path = recommendations.profile_json_path
+                engine = recommendations.engine
+                recommended_projects = [
+                    {
+                        "project_name": item.project_name,
+                        "reason": item.reason,
+                        "probability": item.probability,
+                        "compatibility_score": item.compatibility_score,
+                        "brochure_url": item.brochure_url,
+                        "rank": item.rank,
+                    }
+                    for item in recommendations.recommended_projects
+                ]
+                if recommendations.recommended_projects:
+                    first = recommendations.recommended_projects[0]
+                    top_project = {
+                        "id": first.canonical_project_id,
+                        "name": first.project_name,
+                        "reason": first.reason or "",
+                        "brochure_url": first.brochure_url or "",
+                    }
+            except Exception:  # noqa: BLE001
+                # El cierre de voz no debe fallar solo porque el recomendador tarde o falle.
+                recommendations = None
+                spoken_summary = (
+                    "Ya tengo tu perfil listo. En la pantalla de resultados "
+                    "vas a ver las opciones recomendadas en un momento."
+                )
+                engine = "deferred"
 
         closing = (
             "Ya terminé de construir tu perfil. "
-            f"Encontré {recommendations_count or 'algunas'} opciones que pueden ajustarse a ti."
+            f"Encontré {recommendations_count} opciones que pueden ajustarse a ti."
         )
-        if recommendations_count == 1:
+        if recommendations_count == 0:
+            closing = "Ya terminé de construir tu perfil."
+        elif recommendations_count == 1:
             closing = (
                 "Ya terminé de construir tu perfil. "
                 "Encontré una opción que puede ajustarse a ti."
@@ -228,7 +355,13 @@ class VoiceOrchestrationService:
                 "Encontré tres opciones que pueden ajustarse a ti."
             )
         if spoken_summary:
-            closing = f"{closing} {spoken_summary}"
+            # Preferir el texto oral completo de Laura (ya incluye apertura amigable).
+            closing = spoken_summary.strip()
+            if not closing.lower().startswith("según la charla"):
+                closing = (
+                    "Según la charla que tuve contigo, y después de revisar "
+                    f"los proyectos del catálogo, {closing[0].lower() + closing[1:] if closing else closing}"
+                )
 
         # Persist completed profile into the configured repository (Postgres when enabled).
         try:
@@ -298,21 +431,27 @@ class VoiceOrchestrationService:
             question.type,
             payload.normalized_value,
         )
-        return self._leads.apply_lead_updates(
-            lead.id,
-            {
-                question.field: value,
-                "field_metadata": {
-                    question.field: FieldProvenance(
-                        source=DataSource.USER_DECLARED,
-                        confirmed=True,
-                        requires_confirmation=False,
-                        updated_at=datetime.now(UTC),
-                        previous_value=getattr(lead, question.field, None),
-                    )
+        try:
+            return self._leads.apply_lead_updates(
+                lead.id,
+                {
+                    question.field: value,
+                    "field_metadata": {
+                        question.field: FieldProvenance(
+                            source=DataSource.USER_DECLARED,
+                            confirmed=True,
+                            requires_confirmation=False,
+                            updated_at=datetime.now(UTC),
+                            previous_value=getattr(lead, question.field, None),
+                        )
+                    },
                 },
-            },
-        )
+            )
+        except ValidationError as exc:
+            raise ValidationBusinessError(
+                "No pude guardar esa respuesta. ¿Puedes reformularla?",
+                code="invalid_lead_update",
+            ) from exc
 
     def _coerce_value(
         self,
@@ -349,9 +488,61 @@ class VoiceOrchestrationService:
             if parsed is None:
                 raise ValidationBusinessError("Responde sí o no, por favor.")
             return parsed
+        if field == "situacion_crediticia" or (
+            question_type == QuestionFieldType.ENUM and field == "situacion_crediticia"
+        ):
+            return self._coerce_credit_situation(value)
+        if field == "plazo_compra" or (
+            question_type == QuestionFieldType.ENUM and field == "plazo_compra"
+        ):
+            return self._coerce_purchase_timeline(value)
         if value is None or (isinstance(value, str) and not value.strip()):
             raise ValidationBusinessError("Necesitamos una respuesta para continuar.")
         return value
+
+    @classmethod
+    def _coerce_credit_situation(cls, value: Any) -> CreditSituation:
+        if isinstance(value, CreditSituation):
+            return value
+        if value is None or (isinstance(value, str) and not value.strip()):
+            raise ValidationBusinessError(
+                "Indica tu situación crediticia, por ejemplo: sin reportes, al día o atrasos menores."
+            )
+        key = str(value).strip().lower()
+        mapped = CREDIT_SITUATION_ALIASES.get(key)
+        if mapped is not None:
+            return mapped
+        try:
+            return CreditSituation(key)
+        except ValueError as exc:
+            raise ValidationBusinessError(
+                "No reconocí esa situación crediticia. "
+                "Puedes decir: sin reportes, al día, atrasos menores, atrasos mayores "
+                "o que no estás seguro(a).",
+                code="invalid_enum_value",
+            ) from exc
+
+    @classmethod
+    def _coerce_purchase_timeline(cls, value: Any) -> PurchaseTimeline:
+        if isinstance(value, PurchaseTimeline):
+            return value
+        if value is None or (isinstance(value, str) and not value.strip()):
+            raise ValidationBusinessError(
+                "Indica en cuánto tiempo te gustaría comprar, por ejemplo: de inmediato o en 6 meses."
+            )
+        key = str(value).strip().lower()
+        mapped = PURCHASE_TIMELINE_ALIASES.get(key)
+        if mapped is not None:
+            return mapped
+        try:
+            return PurchaseTimeline(key)
+        except ValueError as exc:
+            raise ValidationBusinessError(
+                "No reconocí ese plazo. "
+                "Puedes decir: de inmediato, en 3 meses, en 6 meses, en 12 meses "
+                "o que aún no lo defines.",
+                code="invalid_enum_value",
+            ) from exc
 
     @staticmethod
     def _as_number(value: Any) -> float | None:
@@ -380,6 +571,84 @@ class VoiceOrchestrationService:
         return None
 
     @staticmethod
+    def _looks_like_user_question(raw: str | None) -> bool:
+        if raw is None:
+            return False
+        text = raw.strip().lower()
+        if not text:
+            return False
+        if "?" in text or "¿" in text:
+            return True
+        hints = (
+            "aclara",
+            "explica",
+            "qué significa",
+            "que significa",
+            "no entend",
+            "una duda",
+            "una pregunta",
+            "quiero saber",
+            "puedes decirme",
+            "me puedes",
+            "qué es",
+            "que es",
+            "cómo funciona",
+            "como funciona",
+            "cuánto",
+            "cuanto",
+            "dónde",
+            "donde",
+            "cuál",
+            "cual ",
+            "por qué",
+            "por que",
+            "puedes repetir",
+            "qué quieres decir",
+            "que quieres decir",
+            "me recomiendas",
+            "se puede",
+            "hay forma",
+        )
+        if any(hint in text for hint in hints):
+            return True
+        return bool(
+            re.match(
+                r"^(qué|que|cómo|como|cuánto|cuanto|dónde|donde|cuál|cual|por\s*qué|por\s*que)\b",
+                text,
+            )
+        )
+
+    @staticmethod
+    def _looks_like_non_answer_transcript(raw: str | None) -> bool:
+        """Reject clear questions/fillers before persisting a voice answer."""
+        if raw is None:
+            return False
+        text = raw.strip().lower()
+        if not text:
+            return True
+        if VoiceOrchestrationService._looks_like_user_question(text):
+            return True
+        fillers = {
+            "eh",
+            "ehh",
+            "mmm",
+            "este",
+            "hola",
+            "ok",
+            "okay",
+            "ajá",
+            "aja",
+            "ya",
+            "bueno",
+            "no sé",
+            "no se",
+            "nada",
+            "dale",
+            "sigue",
+        }
+        return text in fillers
+
+    @staticmethod
     def _as_bool(value: Any) -> bool | None:
         if isinstance(value, bool):
             return value
@@ -404,18 +673,20 @@ class VoiceOrchestrationService:
         name = display_name or "hola"
         if lead.known_lead and lead.afiliado:
             return (
-                f"Hola, {name}. Ya conocemos una parte de tu perfil, "
-                "así que esta conversación será más corta."
+                f"Hola {name}, soy Laura, asesora de Colsubsidio. "
+                "Estoy aquí para ayudarte a elegir la mejor opción de vivienda; "
+                "ya tenemos algo de tu perfil, así que esto va a ser más cortico."
             )
         if lead.known_lead and lead.afiliado is False:
             return (
-                f"Hola, {name}. Encontramos información básica y podemos "
-                "construir juntos una orientación personalizada."
+                f"Hola {name}, soy Laura, asesora de Colsubsidio. "
+                "Te acompaño a tomar una buena decisión de vivienda; "
+                "ya vimos un poco de información y armamos juntos tu orientación."
             )
         return (
-            f"Hola{', ' + name if display_name else ''}. "
-            "Vamos a construir tu perfil de vivienda en pocos minutos, "
-            "con una pregunta a la vez."
+            f"Hola{(' ' + name) if display_name else ''}, soy Laura, "
+            "asesora de Colsubsidio. Estoy para ayudarte a escoger la vivienda "
+            "que mejor te quede; vamos paso a paso, una pregunta a la vez."
         )
 
     @staticmethod
@@ -435,7 +706,10 @@ class VoiceOrchestrationService:
                 "Pide confirmación del dato precargado sin revelar cifras "
                 "sensibles innecesarias."
             )
-        return f"Agradece brevemente y pregunta: {question.question}"
+        return (
+            "Reconoce con naturalidad (sin decir gracias) y pregunta: "
+            f"{question.question}"
+        )
 
     @staticmethod
     def _clarification_for(question: NextQuestion) -> str:

@@ -10,6 +10,8 @@ from app.schemas.realtime import (
     VoiceAnswerResponse,
     VoiceCompleteResponse,
     VoiceContextResponse,
+    VoiceEngagementRequest,
+    VoiceEngagementResponse,
 )
 from app.services.voice_orchestration_service import VoiceOrchestrationService
 
@@ -39,6 +41,19 @@ def submit_voice_answer(
     service: VoiceOrchestrationService = Depends(get_voice_orchestration_service),
 ) -> VoiceAnswerResponse:
     return service.submit_answer(lead_id, payload)
+
+
+@router.post(
+    "/leads/{lead_id}/engagement",
+    response_model=VoiceEngagementResponse,
+    summary="Registrar predisposición/sentimiento detectado en voz",
+)
+def report_voice_engagement(
+    lead_id: UUID,
+    payload: VoiceEngagementRequest,
+    service: VoiceOrchestrationService = Depends(get_voice_orchestration_service),
+) -> VoiceEngagementResponse:
+    return service.report_engagement(lead_id, payload)
 
 
 @router.post(

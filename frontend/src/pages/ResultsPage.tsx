@@ -2,9 +2,11 @@ import { useQuery } from '@tanstack/react-query'
 import { motion } from 'framer-motion'
 import { useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
-import { evaluateLead, getSummary } from '@/api/leads.api'
+import { evaluateLead, getLead, getSummary } from '@/api/leads.api'
 import { getRecommendations } from '@/api/recommendations.api'
 import { ProjectCard } from '@/components/recommendations/ProjectCard'
+import { LauraRecommendationSpeech } from '@/components/recommendations/LauraRecommendationSpeech'
+import { EngagementBadge } from '@/components/conversation/EngagementBadge'
 import { AppShell } from '@/components/layout/AppShell'
 import { Button } from '@/components/ui/Button'
 import { ErrorState } from '@/components/ui/ErrorState'
@@ -36,10 +38,15 @@ export const ResultsPage = () => {
     enabled: Boolean(leadId),
   })
 
+  const leadQuery = useQuery({
+    queryKey: ['lead', leadId],
+    queryFn: () => getLead(leadId),
+    enabled: Boolean(leadId),
+  })
+
   const loading =
-    readinessQuery.isLoading || recommendationsQuery.isLoading || summaryQuery.isLoading
-  const error =
-    readinessQuery.error || recommendationsQuery.error || summaryQuery.error
+    readinessQuery.isLoading || recommendationsQuery.isLoading
+  const error = readinessQuery.error || recommendationsQuery.error
 
   const readiness = readinessQuery.data
   const recommendations = recommendationsQuery.data
@@ -65,11 +72,15 @@ export const ResultsPage = () => {
   }
 
   if (error) {
+    const detail =
+      error instanceof Error && error.message
+        ? error.message
+        : 'Revisa que el backend esté en ejecución.'
     return (
       <AppShell>
         <div className="mx-auto max-w-lg py-16">
           <ErrorState
-            message="No pudimos generar tus recomendaciones. Revisa que el backend esté en ejecución."
+            message={`No pudimos generar tus recomendaciones. ${detail}`}
             onRetry={() => {
               void readinessQuery.refetch()
               void recommendationsQuery.refetch()
@@ -97,6 +108,10 @@ export const ResultsPage = () => {
         <p className="mt-4 max-w-2xl text-[var(--color-muted)]">
           Este resultado es orientativo y no constituye una aprobación de crédito hipotecario.
         </p>
+
+        <div className="mt-6 max-w-xl">
+          <EngagementBadge lead={leadQuery.data} />
+        </div>
 
         <div className="mt-8 grid gap-4 md:grid-cols-3">
           <div className="rounded-3xl bg-white p-5 surface-shadow">
@@ -150,24 +165,12 @@ export const ResultsPage = () => {
           </div>
 
           {recommendations?.spoken_summary && (
-            <div className="mb-6 rounded-3xl border border-[var(--color-line)] bg-white/90 p-5">
-              <p className="text-sm font-semibold uppercase tracking-[0.14em] text-[var(--color-green)]">
-                Recomendación en voz
-              </p>
-              <p className="mt-3 text-lg leading-relaxed text-[var(--color-ink)]">
-                {recommendations.spoken_summary}
-              </p>
-              {projects[0]?.brochure_url && (
-                <a
-                  href={projects[0].brochure_url}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="mt-4 inline-flex text-sm font-semibold text-[var(--color-blue)] underline"
-                >
-                  Abrir brochure de {projects[0].project_name}
-                </a>
-              )}
-            </div>
+            <LauraRecommendationSpeech
+              spokenSummary={recommendations.spoken_summary}
+              brochureUrl={projects[0]?.brochure_url}
+              projectName={projects[0]?.project_name}
+              autoPlay
+            />
           )}
 
           <div className="grid gap-5 lg:grid-cols-3">

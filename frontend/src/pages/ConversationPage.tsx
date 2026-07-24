@@ -64,11 +64,20 @@ export const ConversationPage = () => {
   }, [leadId])
 
   useEffect(() => {
+    const handler = () => {
+      void queryClient.invalidateQueries({ queryKey: ['lead', leadId] })
+    }
+    window.addEventListener('casalista-engagement-updated', handler)
+    return () => window.removeEventListener('casalista-engagement-updated', handler)
+  }, [leadId, queryClient])
+
+  useEffect(() => {
     const handler = (path: string) => {
-      void stopSession().finally(() => navigate(path))
+      // El provider ya cerró la sesión de voz tras el speech de cierre.
+      navigate(path)
     }
     window.dispatchEvent(new CustomEvent('casalista-voice-navigate', { detail: handler }))
-  }, [navigate, stopSession])
+  }, [navigate])
 
   const leadQuery = useQuery({
     queryKey: ['lead', leadId],
@@ -179,6 +188,11 @@ export const ConversationPage = () => {
     return () => window.clearInterval(timer)
   }, [isConnected, leadId, queryClient, useRealtimeVoice])
 
+  useEffect(() => {
+    if (!leadQuery.isError) return
+    void stopSession()
+  }, [leadQuery.isError, stopSession])
+
   if (leadQuery.isLoading) {
     return (
       <AppShell>
@@ -190,11 +204,16 @@ export const ConversationPage = () => {
   }
 
   if (leadQuery.isError) {
+    const status = (leadQuery.error as { status?: number } | null)?.status
+    const message =
+      status === 422
+        ? 'Hubo un problema al actualizar tu perfil con una respuesta de voz. Empecemos de nuevo para continuar.'
+        : 'La sesión de demostración ya no está disponible. Podemos comenzar una nueva.'
     return (
       <AppShell>
         <div className="mx-auto max-w-lg py-16">
           <ErrorState
-            message="La sesión de demostración ya no está disponible. Podemos comenzar una nueva."
+            message={message}
             onRetry={() => navigate('/identification')}
           />
           <Link to="/" className="mt-4 inline-block text-[var(--color-blue)] hover:underline">
@@ -294,7 +313,7 @@ export const ConversationPage = () => {
             <div className="mb-6 rounded-3xl border border-[var(--color-line)] bg-white/90 p-4 text-left text-sm">
               {assistantTranscript && (
                 <p>
-                  <span className="font-semibold text-[var(--color-blue)]">CasaLista:</span>{' '}
+                  <span className="font-semibold text-[var(--color-blue)]">Laura:</span>{' '}
                   {assistantTranscript}
                 </p>
               )}
@@ -315,7 +334,7 @@ export const ConversationPage = () => {
                 <ul className="mt-3 max-h-40 space-y-2 overflow-y-auto text-[var(--color-muted)]">
                   {conversationHistory.map((item) => (
                     <li key={item.id}>
-                      <strong>{item.role === 'user' ? 'Tú' : 'CasaLista'}:</strong> {item.text}
+                      <strong>{item.role === 'user' ? 'Tú' : 'Laura'}:</strong> {item.text}
                     </li>
                   ))}
                 </ul>

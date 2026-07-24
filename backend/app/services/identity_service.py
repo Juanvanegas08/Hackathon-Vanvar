@@ -99,6 +99,29 @@ class IdentityService:
         doc_type = DocumentType(document_type.upper())
         existing = self._repository.get_by_document(document_type, document_number)
         if existing is not None:
+            # "Continuar" reusa el perfil; "empezar desde cero" lo borra en BD.
+            if not data_consent:
+                wiped = existing.reset_for_fresh_start()
+                reset = self._repository.reset_profile(wiped)
+                context = {
+                    "known_lead": False,
+                    "identity_status": (
+                        reset.identity_status.value
+                        if hasattr(reset.identity_status, "value")
+                        else str(reset.identity_status)
+                    ),
+                    "identity_verified": False,
+                    "demo_mode": bool(reset.demo_mode),
+                    "profile_source": "reset",
+                    "created": False,
+                    "reset": True,
+                    "message": (
+                        "Perfil reiniciado desde cero: se borraron datos de "
+                        "conversación, predisposición y recomendaciones previas."
+                    ),
+                }
+                return reset, context
+
             if data_consent and existing.data_consent is not True:
                 existing = existing.apply_partial_update(
                     {
@@ -119,6 +142,7 @@ class IdentityService:
                 "demo_mode": bool(existing.demo_mode),
                 "profile_source": "database",
                 "created": False,
+                "reset": False,
                 "message": "Perfil recuperado desde la base de datos.",
             }
             return existing, context

@@ -116,10 +116,71 @@ class PostgresLeadRepository:
             )
 
     def save_profile(self, lead: Lead) -> Lead:
-        """Upsert the full profile document after the agent conversation."""
-        # Keep local JSON copy for debugging / offline import.
-        self._profiles.save_lead_profile(lead)
+        """Upsert the full profile document in PostgreSQL after the conversation."""
         return self.update(lead) if self.get_by_id(lead.id) else self.create(lead)
+
+    def reset_profile(self, lead: Lead) -> Lead:
+        """Wipe profile columns, field metadata and recommendation runs for the lead."""
+        with sync_session_scope(self._settings) as session:
+            existing = session.get(LeadRow, lead.id)
+            if existing is None:
+                raise NotFoundError(f"Lead {lead.id} no encontrado")
+            self._clear_recommendation_runs(session, lead.id)
+            self._clear_field_metadata(session, lead.id)
+            self._clear_person_contacts(session, existing.person_id)
+            return self._upsert_full(session, lead, create_if_missing=False)
+
+    def _clear_person_contacts(self, session: Session, person_id: UUID) -> None:
+        contacts = session.scalars(
+            select(ContactPoint).where(ContactPoint.person_id == person_id)
+        ).all()
+        for contact in contacts:
+            session.delete(contact)
+
+    def _clear_field_metadata(self, session: Session, lead_id: UUID) -> None:
+        rows = session.scalars(
+            select(LeadFieldMetadata).where(LeadFieldMetadata.lead_id == lead_id)
+        ).all()
+        for row in rows:
+            session.delete(row)
+
+    def _clear_recommendation_runs(self, session: Session, lead_id: UUID) -> None:
+        try:
+            from app.db.models.recommendations import (
+                RecommendationFactor,
+                RecommendationFeedback,
+                RecommendationItem,
+                RecommendationRun,
+            )
+        except Exception:  # noqa: BLE001
+            return
+
+        runs = session.scalars(
+            select(RecommendationRun).where(RecommendationRun.lead_id == lead_id)
+        ).all()
+        for run in runs:
+            items = session.scalars(
+                select(RecommendationItem).where(
+                    RecommendationItem.recommendation_run_id == run.id
+                )
+            ).all()
+            for item in items:
+                factors = session.scalars(
+                    select(RecommendationFactor).where(
+                        RecommendationFactor.recommendation_item_id == item.id
+                    )
+                ).all()
+                for factor in factors:
+                    session.delete(factor)
+                feedbacks = session.scalars(
+                    select(RecommendationFeedback).where(
+                        RecommendationFeedback.recommendation_item_id == item.id
+                    )
+                ).all()
+                for feedback in feedbacks:
+                    session.delete(feedback)
+                session.delete(item)
+            session.delete(run)
 
     def _upsert_full(
         self,

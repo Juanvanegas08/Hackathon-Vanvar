@@ -1,26 +1,21 @@
-"""Persist completed lead profiles as organized JSON for future DB import."""
+"""Build organized lead profile documents for PostgreSQL and LLM prompts."""
 
 from __future__ import annotations
 
-import json
 from datetime import UTC, datetime
-from pathlib import Path
 from typing import Any
-from uuid import UUID
 
-from app.core.config import Settings, get_settings
 from app.models.lead import Lead
 
 
 class ProfilePersistenceService:
-    """Serialize leads into a stable nested JSON document."""
+    """Serialize leads into a stable nested document (DB / OpenAI payload)."""
 
     SCHEMA_VERSION = "1.0"
 
-    def __init__(self, settings: Settings | None = None) -> None:
-        self._settings = settings or get_settings()
-        self._root = Path(self._settings.lead_profiles_path)
-        self._root.mkdir(parents=True, exist_ok=True)
+    def __init__(self, settings: object | None = None) -> None:
+        # Settings kept for call-site compatibility; profiles are DB-only now.
+        self._settings = settings
 
     def build_document(self, lead: Lead) -> dict[str, Any]:
         """Return an organized profile dictionary ready for persistence."""
@@ -83,6 +78,16 @@ class ProfilePersistenceService:
                 "fecha_actualizacion": lead.fecha_actualizacion.isoformat(),
                 "demo_mode": lead.demo_mode,
             },
+            "engagement": {
+                "label": self._enum(lead.engagement_label),
+                "score": lead.engagement_score,
+                "reason": lead.engagement_reason,
+                "updated_at": (
+                    lead.engagement_updated_at.isoformat()
+                    if lead.engagement_updated_at
+                    else None
+                ),
+            },
             "field_provenance": {
                 field: {
                     "source": self._enum(meta.source),
@@ -97,27 +102,6 @@ class ProfilePersistenceService:
             "prefilled_fields": list(lead.prefilled_fields),
             "fields_to_confirm": list(lead.fields_to_confirm),
         }
-
-    def save_lead_profile(self, lead: Lead) -> Path:
-        """Write the organized profile JSON and return the file path."""
-        document = self.build_document(lead)
-        path = self._root / f"{lead.id}.json"
-        path.write_text(
-            json.dumps(document, ensure_ascii=False, indent=2),
-            encoding="utf-8",
-        )
-        latest = self._root / "latest_profile.json"
-        latest.write_text(
-            json.dumps(document, ensure_ascii=False, indent=2),
-            encoding="utf-8",
-        )
-        return path
-
-    def load_lead_profile(self, lead_id: UUID | str) -> dict[str, Any] | None:
-        path = self._root / f"{lead_id}.json"
-        if not path.exists():
-            return None
-        return json.loads(path.read_text(encoding="utf-8"))
 
     @staticmethod
     def _enum(value: object) -> Any:

@@ -13,6 +13,7 @@ from app.models.lead import (
     CreditSituation,
     DataSource,
     DocumentType,
+    EngagementLabel,
     FieldProvenance,
     IdentityStatus,
     Lead,
@@ -120,6 +121,20 @@ def build_profile_columns(lead: Lead, document: dict[str, Any]) -> dict[str, Any
             "prefilled_fields": list(lead.prefilled_fields),
             "fields_to_confirm": list(lead.fields_to_confirm),
             "demo_mode": lead.demo_mode,
+            "engagement": {
+                "label": (
+                    lead.engagement_label.value
+                    if lead.engagement_label is not None
+                    else None
+                ),
+                "score": lead.engagement_score,
+                "reason": lead.engagement_reason,
+                "updated_at": (
+                    lead.engagement_updated_at.isoformat()
+                    if lead.engagement_updated_at
+                    else None
+                ),
+            },
         },
         "profile_document": document,
     }
@@ -138,8 +153,11 @@ def domain_lead_from_rows(
     phone: str | None = None,
     email: str | None = None,
 ) -> Lead:
-    document = getattr(profile, "profile_document", None) or {}
     extras = getattr(profile, "additional_preferences", None) or {}
+    document = getattr(profile, "profile_document", None) or {}
+    if not isinstance(document, dict) or not document:
+        nested = extras.get("profile_document") if isinstance(extras, dict) else None
+        document = nested if isinstance(nested, dict) else {}
     identity = document.get("identity", {}) if isinstance(document, dict) else {}
     contact = document.get("contact", {}) if isinstance(document, dict) else {}
     financial = document.get("financial", {}) if isinstance(document, dict) else {}
@@ -171,6 +189,11 @@ def domain_lead_from_rows(
                     else None
                 ),
             )
+
+    engagement = extras.get("engagement") if isinstance(extras.get("engagement"), dict) else {}
+    raw_score = engagement.get("score", extras.get("engagement_score"))
+    engagement_score = int(raw_score) if isinstance(raw_score, (int, float)) else None
+    engagement_updated_raw = engagement.get("updated_at")
 
     return Lead(
         id=lead_id,
@@ -265,5 +288,16 @@ def domain_lead_from_rows(
         ),
         field_metadata=field_metadata,
         demo_mode=bool(extras.get("demo_mode", False)),
+        engagement_label=enum_or_none(
+            EngagementLabel,
+            engagement.get("label", extras.get("engagement_label")),
+        ),
+        engagement_score=engagement_score,
+        engagement_reason=engagement.get("reason", extras.get("engagement_reason")),
+        engagement_updated_at=(
+            datetime.fromisoformat(engagement_updated_raw)
+            if isinstance(engagement_updated_raw, str)
+            else None
+        ),
         fecha_actualizacion=datetime.now(UTC),
     )

@@ -97,4 +97,44 @@ export const submitVoiceAnswer = async (leadId: string, payload: VoiceAnswerPayl
     .data
 
 export const completeVoiceProfile = async (leadId: string) =>
-  (await apiClient.post<VoiceCompleteResponse>(`/api/v1/voice/leads/${leadId}/complete`)).data
+  (
+    await apiClient.post<VoiceCompleteResponse>(
+      `/api/v1/voice/leads/${leadId}/complete`,
+      // El cierre llama al recomendador OpenAI; suele tardar >15s del timeout global.
+      undefined,
+      { timeout: 90_000 },
+    )
+  ).data
+
+export type EngagementLabel =
+  | 'interesado'
+  | 'indeciso'
+  | 'molesto'
+  | 'trolleando'
+  | 'ocupado'
+  | 'desconocido'
+
+export interface VoiceEngagementPayload {
+  label: EngagementLabel
+  score?: number | null
+  reason?: string | null
+}
+
+export interface VoiceEngagementResponse {
+  accepted: boolean
+  engagement_label: EngagementLabel | string
+  engagement_score?: number | null
+  engagement_reason?: string | null
+  engagement_updated_at?: string | null
+}
+
+export const reportVoiceEngagement = async (
+  leadId: string,
+  payload: VoiceEngagementPayload,
+) =>
+  (
+    await apiClient.post<VoiceEngagementResponse>(
+      `/api/v1/voice/leads/${leadId}/engagement`,
+      payload,
+    )
+  ).data
