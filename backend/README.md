@@ -108,15 +108,18 @@ PROJECT_PROFILES_PATH=./data/processed/project_profiles.json
 PROJECT_ALIASES_PATH=./data/processed/project_aliases.json
 PROJECTS_CANONICAL_PATH=./data/processed/projects_canonical.json
 MOCK_AFFILIATES_PATH=./data/mock/mock_affiliates.json
+MOCK_AFFILIATES_HISTORICAL_PATH=./data/mock/mock_affiliates_historical.json
 ```
 
 Mock de compradores históricos (mismo esquema del CSV del reto, datos ficticios):
 
 ```bash
 python scripts/generate_mock_buyers.py
-python scripts/prepare_data.py --buyers data/mock/mock_buyers.csv --brochures "docs/Links brochures .xlsx"
+python scripts/prepare_data.py --buyers data/mock/mock_buyers.csv --brochures "docs/Links brochures.xlsx"
+python scripts/generate_synthetic_persons.py
 ```
 
+El CSV del reto **no trae PII**: cada fila es un hecho de compra/perfil. `generate_synthetic_persons.py` crea una persona ficticia 1:1 (CC `9000…`, contacto, afiliación demo) y el JSON para el lookup mock.
 Importante: configura `SMMLV` con el salario mínimo vigente antes de calcular categorías A/B/C. Si `SMMLV <= 0`, el cálculo salarial se bloquea con un error controlado. La categoría D (no afiliado) no requiere SMMLV.
 
 ## Ejecución de la API
@@ -486,9 +489,13 @@ Ver [`ops/postgres/roles_and_grants.sql.example`](ops/postgres/roles_and_grants.
 
 ### Seeds / carga histórica
 
-Tras `prepare_data` y `build_project_profiles`:
+Tras `prepare_data`, `generate_synthetic_persons` y `build_project_profiles`:
 
 ```bash
+python scripts/prepare_data.py --buyers "docs/hackathon_VIVIENDAv2.xlsx - CV_SSS_VIV_PENETRACION_PERFIL_C.csv" --brochures "docs/Links brochures.xlsx"
+python scripts/generate_synthetic_persons.py
+python scripts/build_project_profiles.py --buyers data/processed/buyers_clean.csv --projects data/processed/projects_catalog.json
+alembic upgrade head   # incluye 0009 person_id en normalized_buyer_records
 python scripts/seed_historical_data.py --dry-run
 python scripts/seed_historical_data.py
 ```
@@ -501,12 +508,16 @@ python scripts/seed_historical_data.py --force
 
 Carga en PostgreSQL:
 
+- `identity.persons` (+ `person_identifiers`, `contact_points`) — personas sintéticas `is_demo=true`
+- `affiliation.affiliation_records` (+ employers) — enlazadas por `person_id`
 - `housing.projects` (+ etapas, precios, assets)
-- `ingestion.import_batches` + `normalized_buyer_records`
+- `ingestion.import_batches` + `normalized_buyer_records` (**con `person_id` FK**)
 - `housing.project_historical_profiles` + `project_profile_distributions`
 - `ingestion.seed_executions` (idempotencia por checksum)
 
-Defaults de rutas: `data/processed/buyers_seed.json`, `projects_catalog.json`, `project_profiles.json`.
+Defaults de rutas: `data/processed/buyers_seed.json`, `persons_seed.json`, `projects_catalog.json`, `project_profiles.json`.
+
+Las CC sintéticas (`9000000000 + row_number`) quedan consultables vía `MockAffiliationLookupProvider` si existe `data/mock/mock_affiliates_historical.json`.
 
 ### Brochures / 360
 
