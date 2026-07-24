@@ -46,9 +46,8 @@ export const ResultsPage = () => {
   const projects = recommendations?.recommended_projects ?? []
   const uniqueCanonical = new Set(projects.map((item) => item.canonical_project_id))
   const affiliated = summaryQuery.data?.affiliation
-    ? Boolean(
-        (summaryQuery.data.affiliation as { afiliado?: boolean | null }).afiliado,
-      )
+    ? ((summaryQuery.data.affiliation as { is_affiliated?: boolean | null }).is_affiliated ??
+      null)
     : null
 
   const readyForAdvisor =

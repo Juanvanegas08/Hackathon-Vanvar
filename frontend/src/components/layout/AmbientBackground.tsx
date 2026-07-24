@@ -1,7 +1,46 @@
-export const AmbientBackground = () => (
-  <div aria-hidden="true" className="pointer-events-none absolute inset-0 overflow-hidden">
-    <div className="absolute -right-[10%] top-[-8%] h-[70vmin] w-[70vmin] rounded-[48%_52%_45%_55%] bg-[radial-gradient(circle_at_35%_35%,#fff6b0_0%,#f5c518_48%,rgba(245,197,24,0)_72%)] opacity-90 blur-2xl" />
-    <div className="absolute -left-[12%] bottom-[-18%] h-[55vmin] w-[55vmin] rounded-[55%_45%_60%_40%] bg-[radial-gradient(circle_at_40%_40%,#ffe56a_0%,#f5c518_40%,rgba(245,197,24,0)_70%)] opacity-50 blur-3xl" />
-    <div className="absolute inset-0 bg-[linear-gradient(180deg,rgba(250,249,246,0.35)_0%,rgba(250,249,246,0.92)_100%)]" />
-  </div>
-)
+import { useId } from 'react'
+
+/**
+ * Bubbles gooey en amarillo, con cobertura estable (sin vacíos blancos grandes).
+ */
+export const AmbientBackground = () => {
+  const uid = useId().replace(/:/g, '')
+  const filterId = `goo-${uid}`
+
+  return (
+    <div aria-hidden="true" className="pointer-events-none absolute inset-0 overflow-hidden">
+      <div className="gradient-bg">
+        {/* Capa fija: siempre hay amarillo en la zona del hero */}
+        <div className="bubble-base-glow" />
+
+        <svg xmlns="http://www.w3.org/2000/svg" className="gradient-bg-svg">
+          <defs>
+            <filter id={filterId}>
+              <feGaussianBlur in="SourceGraphic" stdDeviation="10" result="blur" />
+              <feColorMatrix
+                in="blur"
+                mode="matrix"
+                values="1 0 0 0 0  0 1 0 0 0  0 0 1 0 0  0 0 0 18 -8"
+                result="goo"
+              />
+              <feBlend in="SourceGraphic" in2="goo" />
+            </filter>
+          </defs>
+        </svg>
+
+        <div
+          className="gradients-container"
+          style={{ filter: `url(#${filterId}) blur(40px)` }}
+        >
+          <div className="g1" />
+          <div className="g2" />
+          <div className="g3" />
+          <div className="g4" />
+          <div className="g5" />
+          <div className="g6" />
+        </div>
+      </div>
+      <div className="gradient-bg-veil" />
+    </div>
+  )
+}
