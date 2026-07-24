@@ -37,6 +37,7 @@ COLUMNS = [
 
 # Housing values are stored in the same inflated export format as the real file
 # (prepare_data scales by /10000). Example: 185_000_000 COP → 1,850,000,000,000
+# (prepare_data scales by /10000). Example: 185_000_000 COP → 1,850,000,000,000
 def _vlr(cop: int) -> str:
     inflated = cop * 10_000
     return f"{inflated:,}"

@@ -1,9 +1,11 @@
 """Seed historical housing data into PostgreSQL.
 
-Loads processed artifacts produced by prepare_data / build_project_profiles:
+Loads processed artifacts produced by prepare_data / generate_synthetic_persons
+/ build_project_profiles:
 
 - projects_catalog.json → housing.projects (+ stages, prices, assets)
-- buyers_seed.json → ingestion.import_batches + normalized_buyer_records
+- persons_seed.json → identity.persons (+ identifiers, contacts) + affiliation
+- buyers_seed.json → ingestion.import_batches + normalized_buyer_records (con person_id)
 - project_profiles.json → housing.project_historical_profiles + distributions
 
 Usage:
@@ -32,6 +34,10 @@ BACKEND_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(BACKEND_ROOT))
 
 from app.core.config import get_settings  # noqa: E402
+from app.db.models.affiliation import (  # noqa: E402
+    AffiliationEmployer,
+    AffiliationRecord,
+)
 from app.db.models.core import DataSource  # noqa: E402
 from app.db.models.housing import (  # noqa: E402
     Project,
@@ -41,6 +47,7 @@ from app.db.models.housing import (  # noqa: E402
     ProjectProfileDistribution,
     ProjectStage,
 )
+from app.db.models.identity import ContactPoint, Person, PersonIdentifier  # noqa: E402
 from app.db.models.ingestion import (  # noqa: E402
     ImportBatch,
     NormalizedBuyerRecord,
@@ -48,9 +55,15 @@ from app.db.models.ingestion import (  # noqa: E402
 )
 from app.utils.normalization import strip_text  # noqa: E402
 from app.utils.project_matching import normalize_project_name  # noqa: E402
+from app.utils.synthetic_persons import (  # noqa: E402
+    affiliated_from_buyer_record,
+    build_synthetic_person,
+    draft_to_person_seed,
+    person_uuid_for_row,
+)
 
 SEED_NAME = "hackathon_historical_buyers"
-SEED_VERSION = "1.0.0"
+SEED_VERSION = "1.1.0"
 DATA_SOURCE_CODE = "hackathon_buyers_export"
 CHUNK_SIZE = 1000
 
@@ -86,6 +99,12 @@ def parse_args() -> argparse.Namespace:
         type=str,
         default="data/processed/project_profiles.json",
         help="JSON de perfiles históricos",
+    )
+    parser.add_argument(
+        "--persons-seed",
+        type=str,
+        default="data/processed/persons_seed.json",
+        help="JSON de personas sintéticas (default: data/processed/persons_seed.json)",
     )
     parser.add_argument(
         "--dry-run",
@@ -200,13 +219,28 @@ def find_seeds_by_name_version(session: Session) -> list[SeedExecution]:
     )
 
 
+def find_seeds_by_name(session: Session) -> list[SeedExecution]:
+    """All executions for this seed name (any version), for --force cleanup."""
+    return list(
+        session.scalars(
+            select(SeedExecution).where(SeedExecution.seed_name == SEED_NAME)
+        )
+    )
+
+
 def purge_previous_seed(session: Session, previous: SeedExecution) -> dict[str, int]:
     """Delete data linked to a previous seed execution via its import batch."""
     meta = previous.metadata_ or {}
     batch_id_raw = meta.get("import_batch_id")
     project_ids_raw = meta.get("project_ids") or []
+    person_ids_raw = meta.get("person_ids") or []
     deleted = {
         "normalized_buyer_records": 0,
+        "affiliation_employers": 0,
+        "affiliation_records": 0,
+        "person_identifiers": 0,
+        "contact_points": 0,
+        "persons": 0,
         "project_profile_distributions": 0,
         "project_historical_profiles": 0,
         "project_prices": 0,
@@ -244,6 +278,36 @@ def purge_previous_seed(session: Session, previous: SeedExecution) -> dict[str, 
             ).rowcount or 0
         deleted["import_batches"] = session.execute(
             delete(ImportBatch).where(ImportBatch.id == batch_id)
+        ).rowcount or 0
+
+    person_ids = [UUID(str(item)) for item in person_ids_raw]
+    if person_ids:
+        affiliation_ids = list(
+            session.scalars(
+                select(AffiliationRecord.id).where(
+                    AffiliationRecord.person_id.in_(person_ids)
+                )
+            )
+        )
+        if affiliation_ids:
+            deleted["affiliation_employers"] = session.execute(
+                delete(AffiliationEmployer).where(
+                    AffiliationEmployer.affiliation_record_id.in_(affiliation_ids)
+                )
+            ).rowcount or 0
+            deleted["affiliation_records"] = session.execute(
+                delete(AffiliationRecord).where(
+                    AffiliationRecord.id.in_(affiliation_ids)
+                )
+            ).rowcount or 0
+        deleted["person_identifiers"] = session.execute(
+            delete(PersonIdentifier).where(PersonIdentifier.person_id.in_(person_ids))
+        ).rowcount or 0
+        deleted["contact_points"] = session.execute(
+            delete(ContactPoint).where(ContactPoint.person_id.in_(person_ids))
+        ).rowcount or 0
+        deleted["persons"] = session.execute(
+            delete(Person).where(Person.id.in_(person_ids))
         ).rowcount or 0
 
     project_ids = [UUID(str(item)) for item in project_ids_raw]
@@ -425,12 +489,134 @@ def create_import_batch(
     return batch
 
 
+def insert_persons(
+    session: Session,
+    *,
+    person_rows: list[dict[str, Any]],
+) -> dict[int, UUID]:
+    """Insert synthetic persons + identity/affiliation rows. Returns row→person_id."""
+    row_to_person: dict[int, UUID] = {}
+    person_buffer: list[dict[str, Any]] = []
+    identifier_buffer: list[dict[str, Any]] = []
+    contact_buffer: list[dict[str, Any]] = []
+    affiliation_buffer: list[dict[str, Any]] = []
+    employer_buffer: list[dict[str, Any]] = []
+
+    def flush_buffers() -> None:
+        nonlocal person_buffer, identifier_buffer, contact_buffer
+        nonlocal affiliation_buffer, employer_buffer
+        if person_buffer:
+            session.execute(pg_insert(Person), person_buffer)
+            person_buffer = []
+        if identifier_buffer:
+            session.execute(pg_insert(PersonIdentifier), identifier_buffer)
+            identifier_buffer = []
+        if contact_buffer:
+            session.execute(pg_insert(ContactPoint), contact_buffer)
+            contact_buffer = []
+        if affiliation_buffer:
+            session.execute(pg_insert(AffiliationRecord), affiliation_buffer)
+            affiliation_buffer = []
+        if employer_buffer:
+            session.execute(pg_insert(AffiliationEmployer), employer_buffer)
+            employer_buffer = []
+        session.flush()
+        print(f"  personas insertadas: {len(row_to_person)}")
+
+    for row in person_rows:
+        row_number = int(row["row_number"])
+        person_id = UUID(str(row["person_id"]))
+        row_to_person[row_number] = person_id
+        person_buffer.append(
+            {
+                "id": person_id,
+                "first_name": strip_text(row.get("first_name")),
+                "last_name": strip_text(row.get("last_name")),
+                "display_name": strip_text(row.get("display_name")),
+                "identity_status": strip_text(row.get("identity_status"))
+                or "not_checked",
+                "is_demo": bool(row.get("is_demo", True)),
+            }
+        )
+        identifier = row.get("identifier") or {}
+        identifier_buffer.append(
+            {
+                "id": uuid4(),
+                "person_id": person_id,
+                "identifier_type": strip_text(identifier.get("identifier_type")) or "CC",
+                "identifier_hash": strip_text(identifier.get("identifier_hash")) or "",
+                "identifier_ciphertext": strip_text(
+                    identifier.get("identifier_ciphertext")
+                ),
+                "identifier_last_four": strip_text(
+                    identifier.get("identifier_last_four")
+                ),
+                "country_code": strip_text(identifier.get("country_code")) or "CO",
+                "is_primary": bool(identifier.get("is_primary", True)),
+                "is_verified": bool(identifier.get("is_verified", False)),
+            }
+        )
+        for contact in row.get("contacts") or []:
+            contact_buffer.append(
+                {
+                    "id": uuid4(),
+                    "person_id": person_id,
+                    "contact_type": strip_text(contact.get("contact_type")) or "phone",
+                    "value_hash": strip_text(contact.get("value_hash")) or "",
+                    "value_ciphertext": strip_text(contact.get("value_ciphertext")),
+                    "masked_value": strip_text(contact.get("masked_value")),
+                    "is_primary": bool(contact.get("is_primary", True)),
+                    "is_verified": bool(contact.get("is_verified", False)),
+                }
+            )
+        affiliation = row.get("affiliation") or {}
+        affiliation_id = uuid4()
+        category = strip_text(affiliation.get("category"))
+        if category not in {"A", "B", "C", "D"}:
+            category = None
+        affiliation_buffer.append(
+            {
+                "id": affiliation_id,
+                "person_id": person_id,
+                "provider": strip_text(affiliation.get("provider"))
+                or "mock_affiliation_service",
+                "status": strip_text(affiliation.get("status")) or "unknown",
+                "category": category,
+                "reported_salary": parse_optional_decimal(
+                    affiliation.get("reported_salary")
+                ),
+                "confirmed": bool(affiliation.get("confirmed", False)),
+                "source_reference": strip_text(affiliation.get("source_reference")),
+            }
+        )
+        employer_name = strip_text(affiliation.get("employer_name"))
+        if employer_name:
+            employer_buffer.append(
+                {
+                    "id": uuid4(),
+                    "affiliation_record_id": affiliation_id,
+                    "employer_name": employer_name,
+                    "reported_salary": parse_optional_decimal(
+                        affiliation.get("reported_salary")
+                    ),
+                    "is_current": True,
+                }
+            )
+
+        if len(person_buffer) >= CHUNK_SIZE:
+            flush_buffers()
+
+    flush_buffers()
+    return row_to_person
+
+
 def insert_buyer_records(
     session: Session,
     *,
     batch: ImportBatch,
     records: list[dict[str, Any]],
     project_ids: dict[str, UUID],
+    person_ids_by_row: dict[int, UUID],
 ) -> tuple[int, int]:
     inserted = 0
     invalid = 0
@@ -449,12 +635,14 @@ def insert_buyer_records(
         project_name = strip_text(record.get("original_project_name"))
         project_key = normalize_project_name(project_name) if project_name else None
         historical_project_id = project_ids.get(project_key) if project_key else None
+        row_number = int(record.get("row_number", inserted))
         try:
             buffer.append(
                 {
                     "id": uuid4(),
                     "batch_id": batch.id,
-                    "row_number": int(record.get("row_number", inserted)),
+                    "row_number": row_number,
+                    "person_id": person_ids_by_row.get(row_number),
                     "historical_project_id": historical_project_id,
                     "original_project_name": project_name,
                     "affiliation_status": strip_text(record.get("affiliation_status")),
@@ -496,6 +684,50 @@ def insert_buyer_records(
     batch.completed_at = datetime.now(UTC)
     session.flush()
     return inserted, invalid
+
+
+def resolve_person_rows(
+    *,
+    persons_path: Path,
+    buyers: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Load persons_seed.json or synthesize deterministically from buyers."""
+    if persons_path.exists():
+        payload = load_json(persons_path)
+        if isinstance(payload, dict) and isinstance(payload.get("persons"), list):
+            return payload["persons"]
+        if isinstance(payload, list):
+            return payload
+        raise ValueError("persons_seed.json inválido: se esperaba {persons: [...]} ")
+
+    print(
+        f"No existe {persons_path}; generando personas sintéticas en memoria "
+        f"desde {len(buyers)} buyers…"
+    )
+    rows: list[dict[str, Any]] = []
+    for record in buyers:
+        row_number = int(record.get("row_number", len(rows)))
+        normalized = record.get("normalized_data") or {}
+        age_range = None
+        segment = strip_text(record.get("commercial_segment"))
+        if isinstance(normalized, dict):
+            age_range = strip_text(normalized.get("rango_edad"))
+            segment = segment or strip_text(normalized.get("segmento_codigo"))
+        draft = build_synthetic_person(
+            row_number=row_number,
+            person_id=str(person_uuid_for_row(row_number)),
+            affiliated=affiliated_from_buyer_record(record),
+            dependents=(
+                int(record["dependents"])
+                if record.get("dependents") is not None
+                else None
+            ),
+            age_range=age_range,
+            segment=segment,
+            company_hint=strip_text(record.get("company_name")),
+        )
+        rows.append(draft_to_person_seed(draft))
+    return rows
 
 
 def insert_profiles(
@@ -590,6 +822,7 @@ def main() -> int:
     buyers_path = Path(args.buyers_seed)
     projects_path = Path(args.projects)
     profiles_path = Path(args.profiles)
+    persons_path = Path(args.persons_seed)
     for path in (buyers_path, projects_path, profiles_path):
         if not path.exists():
             print(f"No existe: {path}")
@@ -608,10 +841,22 @@ def main() -> int:
         print("project_profiles.json debe incluir catalog_profiles.")
         return 1
 
-    checksum = combined_checksum([buyers_path, projects_path, profiles_path])
+    try:
+        person_rows = resolve_person_rows(persons_path=persons_path, buyers=buyers)
+    except ValueError as exc:
+        print(str(exc))
+        return 1
+
+    checksum_paths = [buyers_path, projects_path, profiles_path]
+    if persons_path.exists():
+        checksum_paths.append(persons_path)
+    checksum = combined_checksum(checksum_paths)
     print(f"Checksum: {checksum[:16]}…")
-    print(f"Proyectos: {len(projects)} | Compradores: {len(buyers)} | "
-          f"Perfiles: {len(profiles.get('catalog_profiles') or [])}")
+    print(
+        f"Proyectos: {len(projects)} | Compradores: {len(buyers)} | "
+        f"Personas: {len(person_rows)} | "
+        f"Perfiles: {len(profiles.get('catalog_profiles') or [])}"
+    )
 
     if args.dry_run:
         print("Dry-run: validación OK, no se escribió en PostgreSQL.")
@@ -662,10 +907,13 @@ def main() -> int:
                 )
                 return 1
 
-            if args.force and previous_seeds:
-                for previous in previous_seeds:
+            if args.force:
+                for previous in find_seeds_by_name(session):
                     purged = purge_previous_seed(session, previous)
-                    print(f"Purgado seed previo {previous.id}: {purged}")
+                    print(
+                        f"Purgado seed previo {previous.id} "
+                        f"(v{previous.seed_version}): {purged}"
+                    )
             elif incomplete_same:
                 for previous in incomplete_same:
                     purged = purge_previous_seed(session, previous)
@@ -685,6 +933,7 @@ def main() -> int:
                     "buyers_seed": str(buyers_path),
                     "projects": str(projects_path),
                     "profiles": str(profiles_path),
+                    "persons_seed": str(persons_path),
                 },
             )
             session.add(seed_row)
@@ -693,6 +942,8 @@ def main() -> int:
             ensure_data_source(session)
             print("Upsert de proyectos…")
             project_ids = upsert_projects(session, projects)
+            print("Insertando personas sintéticas…")
+            person_ids_by_row = insert_persons(session, person_rows=person_rows)
             print("Creando import batch…")
             batch = create_import_batch(
                 session,
@@ -706,6 +957,7 @@ def main() -> int:
                 batch=batch,
                 records=buyers,
                 project_ids=project_ids,
+                person_ids_by_row=person_ids_by_row,
             )
             print("Insertando perfiles históricos…")
             profiles_inserted, distributions_inserted = insert_profiles(
@@ -718,14 +970,20 @@ def main() -> int:
             seed_row.status = "completed"
             seed_row.completed_at = datetime.now(UTC)
             seed_row.records_inserted = (
-                len(project_ids) + buyers_inserted + profiles_inserted + distributions_inserted
+                len(project_ids)
+                + len(person_ids_by_row)
+                + buyers_inserted
+                + profiles_inserted
+                + distributions_inserted
             )
             seed_row.records_skipped = buyers_invalid
             seed_row.metadata_ = {
                 **(seed_row.metadata_ or {}),
                 "import_batch_id": str(batch.id),
                 "project_ids": [str(value) for value in project_ids.values()],
+                "person_ids": [str(value) for value in person_ids_by_row.values()],
                 "projects_upserted": len(project_ids),
+                "persons_inserted": len(person_ids_by_row),
                 "buyers_inserted": buyers_inserted,
                 "buyers_invalid": buyers_invalid,
                 "profiles_inserted": profiles_inserted,
@@ -735,6 +993,7 @@ def main() -> int:
 
             print("Seed completado.")
             print(f"  projects: {len(project_ids)}")
+            print(f"  persons: {len(person_ids_by_row)}")
             print(f"  buyers: {buyers_inserted} (invalidas: {buyers_invalid})")
             print(f"  profiles: {profiles_inserted}")
             print(f"  distributions: {distributions_inserted}")
