@@ -59,7 +59,7 @@ const formatValidationDetail = (detail: unknown): string => {
 }
 
 export const apiClient = axios.create({
-  baseURL: import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000',
+  baseURL: import.meta.env.VITE_API_BASE_URL || 'http://localhost:8100',
   timeout: 15_000,
   headers: { 'Content-Type': 'application/json' },
 })

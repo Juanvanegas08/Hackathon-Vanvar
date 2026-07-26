@@ -42,3 +42,4 @@ data/mock/mock_affiliates_historical.json
 # Local dumps
 *.log
 *.sqlite3
+logs/

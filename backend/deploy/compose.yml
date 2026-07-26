@@ -1,0 +1,45 @@
+# Referencia de despliegue (Podman) — puerto 8100
+#
+# En el VPS el repo está en:
+#   /opt/reto-vivienda-colsubsidio/Hackathon-Vanvar
+#
+# Build:
+#   cd /opt/reto-vivienda-colsubsidio/Hackathon-Vanvar/backend
+#   podman build -t casalista-voice-api:latest .
+#
+# Run:
+#   podman rm -f casalista-voice-api 2>/dev/null || true
+#   podman run -d --name casalista-voice-api --network host --restart unless-stopped \
+#     -v /etc/localtime:/etc/localtime:ro \
+#     -v /opt/reto-vivienda-colsubsidio/Hackathon-Vanvar/backend/.env:/app/.env:ro \
+#     -e APP_ENV=production \
+#     -e GUNICORN_BIND=127.0.0.1:8100 \
+#     -e RUN_MIGRATIONS=1 \
+#     casalista-voice-api:latest
+#
+# Debug si no responde :8100:
+#   podman ps -a --filter name=casalista-voice-api
+#   podman logs --tail 150 casalista-voice-api
+#
+# Nginx (api.vivienda.colsubsidio.vanvar.tech) → 127.0.0.1:8100
+
+services:
+  api:
+    image: ${IMAGE_NAME:-casalista-voice-api}:${IMAGE_TAG:-latest}
+    container_name: casalista-voice-api
+    restart: unless-stopped
+    network_mode: host
+    environment:
+      APP_ENV: production
+      ENVIRONMENT: production
+      GUNICORN_BIND: "127.0.0.1:8100"
+      RUN_MIGRATIONS: ${RUN_MIGRATIONS:-1}
+    volumes:
+      - /etc/localtime:/etc/localtime:ro
+      - ${ENV_FILE:-/opt/reto-vivienda-colsubsidio/Hackathon-Vanvar/backend/.env}:/app/.env:ro
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8100/api/v1/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 60s
