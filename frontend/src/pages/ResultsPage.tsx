@@ -12,12 +12,10 @@ import { Button } from '@/components/ui/Button'
 import { ErrorState } from '@/components/ui/ErrorState'
 import { Modal } from '@/components/ui/Modal'
 import { Spinner } from '@/components/ui/Spinner'
-import type { ProjectRecommendation } from '@/api/types'
 
 export const ResultsPage = () => {
   const { leadId = '' } = useParams()
   const navigate = useNavigate()
-  const [interestProject, setInterestProject] = useState<ProjectRecommendation | null>(null)
   const [actionModal, setActionModal] = useState<'asesor' | 'ruta' | null>(null)
 
   const readinessQuery = useQuery({
@@ -175,11 +173,7 @@ export const ResultsPage = () => {
 
           <div className="grid gap-5 lg:grid-cols-3">
             {projects.map((project) => (
-              <ProjectCard
-                key={project.canonical_project_id}
-                project={project}
-                onInterest={setInterestProject}
-              />
+              <ProjectCard key={project.canonical_project_id} project={project} />
             ))}
           </div>
         </div>
@@ -202,21 +196,6 @@ export const ResultsPage = () => {
           </Link>
         </div>
       </motion.section>
-
-      <Modal
-        open={Boolean(interestProject)}
-        title="Interés registrado"
-        onClose={() => setInterestProject(null)}
-      >
-        <p className="text-[var(--color-muted)]">
-          Registramos tu interés en{' '}
-          <strong className="text-[var(--color-ink)]">{interestProject?.project_name}</strong>. En
-          una fase posterior, un asesor dará seguimiento.
-        </p>
-        <div className="mt-6">
-          <Button onClick={() => setInterestProject(null)}>Continuar</Button>
-        </div>
-      </Modal>
 
       <Modal
         open={actionModal !== null}

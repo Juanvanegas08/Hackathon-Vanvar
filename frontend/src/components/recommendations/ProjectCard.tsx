@@ -1,17 +1,25 @@
-import { ExternalLink, FileText, Heart, MapPin } from 'lucide-react'
+import { ExternalLink, FileText, MapPin } from 'lucide-react'
 import type { ProjectRecommendation } from '@/api/types'
 import { Badge } from '@/components/ui/Badge'
 import { Button } from '@/components/ui/Button'
+import { findBrochureForProject } from '@/data/brochures'
 
 interface ProjectCardProps {
   project: ProjectRecommendation
-  onInterest?: (project: ProjectRecommendation) => void
 }
 
-export const ProjectCard = ({ project, onInterest }: ProjectCardProps) => {
+export const ProjectCard = ({ project }: ProjectCardProps) => {
   const reasons = project.reason
     ? [{ factor: 'reason', message: project.reason, contribution: 0 }]
     : (project.matched_factors ?? []).slice(0, 3)
+
+  const brochure = findBrochureForProject({
+    projectId: project.project_id,
+    canonicalId: project.canonical_project_id,
+    projectName: project.project_name,
+    brochureUrl: project.brochure_url,
+  })
+  const brochureUrl = brochure?.url ?? project.brochure_url ?? null
 
   return (
     <article className="flex h-full flex-col rounded-3xl bg-white p-6 text-left surface-shadow">
@@ -69,9 +77,9 @@ export const ProjectCard = ({ project, onInterest }: ProjectCardProps) => {
       )}
 
       <div className="mt-auto flex flex-wrap gap-2 pt-5">
-        {project.brochure_url && (
-          <a href={project.brochure_url} target="_blank" rel="noreferrer">
-            <Button variant="secondary" className="gap-2">
+        {brochureUrl && (
+          <a href={brochureUrl} target="_blank" rel="noreferrer">
+            <Button className="gap-2">
               <FileText size={16} aria-hidden /> Ver brochure
             </Button>
           </a>
@@ -83,13 +91,6 @@ export const ProjectCard = ({ project, onInterest }: ProjectCardProps) => {
             </Button>
           </a>
         )}
-        <Button
-          className="gap-2"
-          onClick={() => onInterest?.(project)}
-          aria-label={`Me interesa el proyecto ${project.project_name}`}
-        >
-          <Heart size={16} aria-hidden /> Me interesa este proyecto
-        </Button>
       </div>
     </article>
   )

@@ -283,7 +283,7 @@ const recommendations: Record<string, RecommendationResponse> = {
         municipio: 'Soacha',
         departamento: 'Cundinamarca',
         etapa: 'comercializacion',
-        brochure_url: 'https://example.com/brochure-mongui',
+        brochure_url: 'https://heyzine.com/flip-book/866af8f6a6.html',
       },
       {
         project_id: 'arrayanes',

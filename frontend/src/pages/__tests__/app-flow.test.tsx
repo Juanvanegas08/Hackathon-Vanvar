@@ -20,8 +20,13 @@ vi.mock('@/api/recommendations.api')
 describe('Landing', () => {
   it('renders hero and primary CTA', () => {
     renderWithProviders(<HomePage />, { route: '/', path: '/' })
-    expect(screen.getByRole('heading', { name: 'CasaLista' })).toBeInTheDocument()
+    expect(
+      screen.getByRole('heading', {
+        name: /tu camino a vivienda puede comenzar con una conversación/i,
+      }),
+    ).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /hablar ahora/i })).toBeInTheDocument()
+    expect(screen.getByAltText('Colsubsidio')).toBeInTheDocument()
   })
 })
 

@@ -89,6 +89,10 @@ export const AdvisorPage = () => {
     ? buildClosingPlaybook(detail.lead, detail.summary, topProject)
     : []
   const affinity = detail ? resolveLeadAffinity(detail.lead, topProject) : null
+  const clientName = detail?.lead.nombre?.trim()
+  const briefingTitle = clientName
+    ? `Briefing de ${clientName}`
+    : 'Briefing del cliente'
 
   return (
     <AppShell>
@@ -99,7 +103,7 @@ export const AdvisorPage = () => {
               Orquestador comercial
             </p>
             <h1 className="mt-2 font-display text-4xl md:text-5xl">
-              Dashboard del asesor humano
+              {briefingTitle}
             </h1>
             <p className="mt-3 max-w-2xl text-[var(--color-muted)]">
               Después de la llamada, aquí tienes el briefing completo: quién es el cliente,
@@ -123,14 +127,6 @@ export const AdvisorPage = () => {
             )}
           </div>
         </div>
-
-        {mockMode && (
-          <div className="mt-6 rounded-2xl border border-[var(--color-yellow)] bg-[#fff9db] px-4 py-3 text-sm text-[var(--color-ink)]">
-            Estás viendo la vista con <strong>datos de demostración</strong>. No se llama al
-            backend. Para volver a datos reales, desactiva “Datos demo” o quita{' '}
-            <code className="rounded bg-white/80 px-1">?mock=1</code> de la URL.
-          </div>
-        )}
 
         {leadsQuery.isLoading && (
           <div className="mt-10">
