@@ -181,17 +181,27 @@ export const ConversationPage = () => {
   }, [answerMutation, isConnected, setSubmitHandler, submitTextResponse, useRealtimeVoice])
 
   useEffect(() => {
-    if (!useRealtimeVoice || !isConnected) return
-    const timer = window.setInterval(() => {
+    if (!useRealtimeVoice || !isConnected || !leadId) return
+    const onLeadUpdated = () => {
       void queryClient.invalidateQueries({ queryKey: ['lead', leadId] })
-    }, 4000)
-    return () => window.clearInterval(timer)
+    }
+    window.addEventListener('casalista-lead-updated', onLeadUpdated)
+    // Poll suave solo como respaldo (evita ráfagas cada pocos segundos).
+    const timer = window.setInterval(onLeadUpdated, 12_000)
+    return () => {
+      window.removeEventListener('casalista-lead-updated', onLeadUpdated)
+      window.clearInterval(timer)
+    }
   }, [isConnected, leadId, queryClient, useRealtimeVoice])
 
   useEffect(() => {
     if (!leadQuery.isError) return
-    void stopSession()
-  }, [leadQuery.isError, stopSession])
+    const status = (leadQuery.error as { status?: number } | null)?.status
+    // Solo cortar sesión si el lead ya no existe; no por errores transitorios.
+    if (status === 404) {
+      void stopSession()
+    }
+  }, [leadQuery.error, leadQuery.isError, stopSession])
 
   if (leadQuery.isLoading) {
     return (
@@ -205,23 +215,26 @@ export const ConversationPage = () => {
 
   if (leadQuery.isError) {
     const status = (leadQuery.error as { status?: number } | null)?.status
-    const message =
-      status === 422
-        ? 'Hubo un problema al actualizar tu perfil con una respuesta de voz. Empecemos de nuevo para continuar.'
-        : 'La sesión de demostración ya no está disponible. Podemos comenzar una nueva.'
-    return (
-      <AppShell>
-        <div className="mx-auto max-w-lg py-16">
-          <ErrorState
-            message={message}
-            onRetry={() => navigate('/identification')}
-          />
-          <Link to="/" className="mt-4 inline-block text-[var(--color-blue)] hover:underline">
-            Ir al inicio
-          </Link>
-        </div>
-      </AppShell>
-    )
+    if (status === 404 || status === 422) {
+      const message =
+        status === 422
+          ? 'Hubo un problema al actualizar tu perfil con una respuesta de voz. Empecemos de nuevo para continuar.'
+          : 'La sesión de demostración ya no está disponible. Podemos comenzar una nueva.'
+      return (
+        <AppShell>
+          <div className="mx-auto max-w-lg py-16">
+            <ErrorState
+              message={message}
+              onRetry={() => navigate('/identification')}
+            />
+            <Link to="/" className="mt-4 inline-block text-[var(--color-blue)] hover:underline">
+              Ir al inicio
+            </Link>
+          </div>
+        </AppShell>
+      )
+    }
+    // Error transitorio de red: no tumbar la conversación de voz.
   }
 
   return (
@@ -241,7 +254,7 @@ export const ConversationPage = () => {
               {finishing
                 ? 'Estamos preparando tus mejores opciones.'
                 : useRealtimeVoice
-                  ? 'Estás conversando con un asistente de voz generado por inteligencia artificial.'
+                  ? 'Habla con naturalidad. Si Laura está hablando, puedes interrumpirla tocando el orbe o hablando encima.'
                   : 'Una pregunta a la vez. Puedes responder con botones o texto.'}
             </p>
           </div>

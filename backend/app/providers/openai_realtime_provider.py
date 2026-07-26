@@ -50,7 +50,18 @@ class OpenAIRealtimeProvider:
                     "input": {
                         "transcription": {
                             "model": self._settings.openai_realtime_transcription_model,
-                        }
+                        },
+                        # server_vad + umbral alto: menos falsas interrupciones por ruido.
+                        # interrupt_response arranca en false; el cliente lo activa tras el saludo.
+                        "noise_reduction": {"type": "near_field"},
+                        "turn_detection": {
+                            "type": "server_vad",
+                            "threshold": 0.72,
+                            "prefix_padding_ms": 300,
+                            "silence_duration_ms": 650,
+                            "create_response": True,
+                            "interrupt_response": False,
+                        },
                     },
                 },
             }

@@ -263,6 +263,11 @@ class RecommendationService:
                     departamento=project.departamento,
                     etapa=project.etapa,
                     historical_profile_available=project.perfil_historico.total_buyers > 0,
+                    historical_profile=(
+                        project.perfil_historico
+                        if project.perfil_historico.total_buyers > 0
+                        else None
+                    ),
                     aliases=aliases,
                     metadata={
                         "original_names": aliases,
@@ -593,6 +598,11 @@ class RecommendationService:
             departamento=project.departamento,
             etapa=project.etapa,
             historical_profile_available=project.perfil_historico.total_buyers > 0,
+            historical_profile=(
+                project.perfil_historico
+                if project.perfil_historico.total_buyers > 0
+                else None
+            ),
             aliases=aliases,
             metadata={
                 "original_names": aliases,

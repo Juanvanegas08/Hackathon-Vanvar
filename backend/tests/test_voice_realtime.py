@@ -235,6 +235,15 @@ def test_openai_provider_parses_secret() -> None:
         assert "sk-real-never-return" in request.headers["Authorization"]
         body = json.loads(request.content.decode("utf-8"))
         assert "metadata" not in body.get("session", {})
+        turn = (
+            body.get("session", {})
+            .get("audio", {})
+            .get("input", {})
+            .get("turn_detection", {})
+        )
+        assert turn.get("type") == "server_vad"
+        assert turn.get("interrupt_response") is False
+        assert float(turn.get("threshold", 0)) >= 0.7
         return httpx.Response(
             200,
             json={

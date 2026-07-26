@@ -28,6 +28,7 @@ class VoiceContextResponse(BaseModel):
     profile_completed: bool
     progress: int = Field(ge=0, le=100)
     next_question: NextQuestion | None = None
+    upcoming_questions: list[NextQuestion] = Field(default_factory=list)
     conversation_opening: str
     confirmed_fields: list[str] = Field(default_factory=list)
     fields_to_confirm: list[str] = Field(default_factory=list)
@@ -48,6 +49,7 @@ class VoiceAnswerResponse(BaseModel):
     profile_completed: bool = False
     progress: int = 0
     next_question: NextQuestion | None = None
+    upcoming_questions: list[NextQuestion] = Field(default_factory=list)
     assistant_guidance: str
     clarification_required: bool = False
     validation_message: str | None = None

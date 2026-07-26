@@ -20,10 +20,14 @@ import {
   listMockAdvisorLeads,
 } from '@/mocks/advisorMockData'
 import {
+  affiliationLabel,
+  affinityBandClass,
+  affinityBandLabel,
+  briefingEyebrow,
   buildBuyerPersona,
   buildCallInsights,
   buildClosingPlaybook,
-  formatStatus,
+  resolveLeadAffinity,
 } from '@/utils/advisorBriefing'
 
 export const AdvisorPage = () => {
@@ -74,16 +78,17 @@ export const AdvisorPage = () => {
   })
 
   const detail = detailQuery.data
+  const topProject = detail?.recommendations.recommended_projects[0] ?? null
   const persona = detail
-    ? buildBuyerPersona(detail.lead, detail.summary)
+    ? buildBuyerPersona(detail.lead, detail.summary, topProject)
     : null
   const insights = detail
-    ? buildCallInsights(detail.lead, detail.summary)
+    ? buildCallInsights(detail.lead, detail.summary, topProject)
     : []
-  const topProject = detail?.recommendations.recommended_projects[0] ?? null
   const playbook = detail
     ? buildClosingPlaybook(detail.lead, detail.summary, topProject)
     : []
+  const affinity = detail ? resolveLeadAffinity(detail.lead, topProject) : null
 
   return (
     <AppShell>
@@ -186,7 +191,7 @@ export const AdvisorPage = () => {
                     <div className="flex flex-wrap items-start justify-between gap-4">
                       <div>
                         <p className="text-xs font-semibold uppercase tracking-[0.16em] text-[var(--color-green)]">
-                          Briefing listo para cerrar
+                          {briefingEyebrow(affinity?.band)}
                         </p>
                         <h2 className="mt-2 font-display text-3xl md:text-4xl">
                           {detail.lead.nombre ?? 'Lead sin nombre'}
@@ -199,16 +204,24 @@ export const AdvisorPage = () => {
                         </p>
                       </div>
                       <div className="flex flex-wrap gap-2">
-                        <Badge>
-                          {formatStatus(
-                            String(detail.summary.readiness?.status ?? detail.lead.estado_lead),
-                          )}
+                        <Badge
+                          className={
+                            detail.lead.afiliado === true
+                              ? 'bg-[var(--color-green)]'
+                              : detail.lead.afiliado === false
+                                ? 'bg-[var(--color-muted)]'
+                                : 'bg-[var(--color-blue)]'
+                          }
+                        >
+                          {affiliationLabel(detail.lead)}
                         </Badge>
-                        <Badge className="bg-[var(--color-green)]">
-                          Score {String(detail.summary.readiness?.score ?? '—')}
+                        <Badge className="bg-[var(--color-blue)]">
+                          {affinity?.percent != null
+                            ? `Afinidad ${Math.round(affinity.percent)}%`
+                            : 'Afinidad —'}
                         </Badge>
-                        <Badge className="bg-[var(--color-muted)]">
-                          {detail.lead.identity_status ?? 'sin identidad'}
+                        <Badge className={affinityBandClass(affinity?.band)}>
+                          {affinityBandLabel(affinity?.band)}
                         </Badge>
                       </div>
                     </div>

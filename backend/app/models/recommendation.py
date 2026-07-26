@@ -8,6 +8,7 @@ from uuid import UUID
 from pydantic import BaseModel, Field
 
 from app.models.evaluation import ConfidenceLevel
+from app.models.project import HistoricalProfile
 
 
 class RecommendationStatus(StrEnum):
@@ -54,6 +55,7 @@ class ProjectRecommendation(BaseModel):
     departamento: str | None = None
     etapa: str | None = None
     historical_profile_available: bool = False
+    historical_profile: HistoricalProfile | None = None
     aliases: list[str] = Field(default_factory=list)
     metadata: dict[str, Any] = Field(default_factory=dict)
     reason: str | None = None

@@ -3,7 +3,12 @@ import { useMemo, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { motion } from 'framer-motion'
 import { MessageCircle, Phone } from 'lucide-react'
-import { requestPhoneCall } from '@/api/phone.api'
+import {
+  lookupPhoneIdentity,
+  requestPhoneCall,
+  type DocumentType,
+  type PhoneLookupResponse,
+} from '@/api/phone.api'
 import { BrochureShowcase } from '@/components/home/BrochureShowcase'
 import { AmbientBackground } from '@/components/layout/AmbientBackground'
 import { AppShell } from '@/components/layout/AppShell'
@@ -13,6 +18,17 @@ import { TextField } from '@/components/ui/TextField'
 import { getErrorMessage } from '@/utils/errors'
 
 type CallMode = 'now' | 'schedule'
+type CallStep = 'document' | 'confirm' | 'register'
+
+const COUNTRY_CODES = [
+  { code: '57', label: 'CO +57' },
+  { code: '1', label: 'US/CA +1' },
+  { code: '52', label: 'MX +52' },
+  { code: '51', label: 'PE +51' },
+  { code: '593', label: 'EC +593' },
+  { code: '58', label: 'VE +58' },
+  { code: '34', label: 'ES +34' },
+] as const
 
 const toLocalInputValue = (date: Date) => {
   const pad = (n: number) => String(n).padStart(2, '0')
@@ -22,10 +38,15 @@ const toLocalInputValue = (date: Date) => {
 export const HomePage = () => {
   const navigate = useNavigate()
   const [callModalOpen, setCallModalOpen] = useState(false)
+  const [step, setStep] = useState<CallStep>('document')
+  const [lookup, setLookup] = useState<PhoneLookupResponse | null>(null)
   const [mode, setMode] = useState<CallMode>('now')
+  const [nombre, setNombre] = useState('')
+  const [countryCode, setCountryCode] = useState('57')
   const [phone, setPhone] = useState('')
-  const [documentType, setDocumentType] = useState<'CC' | 'CE' | 'PP' | 'NIT'>('CC')
+  const [documentType, setDocumentType] = useState<DocumentType>('CC')
   const [documentNumber, setDocumentNumber] = useState('')
+  const [phoneConfirmed, setPhoneConfirmed] = useState(false)
   const [scheduledLocal, setScheduledLocal] = useState(() => {
     const d = new Date(Date.now() + 15 * 60_000)
     return toLocalInputValue(d)
@@ -35,6 +56,26 @@ export const HomePage = () => {
   const [successMessage, setSuccessMessage] = useState<string | null>(null)
 
   const minSchedule = useMemo(() => toLocalInputValue(new Date(Date.now() + 2 * 60_000)), [])
+
+  const lookupMutation = useMutation({
+    mutationFn: lookupPhoneIdentity,
+    onSuccess: (result) => {
+      setFormError(null)
+      setLookup(result)
+      if (result.nombre) {
+        setNombre(result.nombre)
+      }
+      if (result.known_lead && result.has_phone) {
+        setStep('confirm')
+        setPhoneConfirmed(false)
+      } else {
+        setStep('register')
+      }
+    },
+    onError: (err) => {
+      setFormError(getErrorMessage(err))
+    },
+  })
 
   const callMutation = useMutation({
     mutationFn: requestPhoneCall,
@@ -50,16 +91,69 @@ export const HomePage = () => {
 
   const resetModal = () => {
     setCallModalOpen(false)
+    setStep('document')
+    setLookup(null)
+    setNombre('')
+    setPhone('')
+    setDocumentNumber('')
+    setPhoneConfirmed(false)
+    setConsent(false)
     setFormError(null)
     setSuccessMessage(null)
+    lookupMutation.reset()
     callMutation.reset()
   }
 
-  const submitCall = () => {
+  const submitLookup = () => {
     setFormError(null)
     setSuccessMessage(null)
-    if (!phone.trim() || !documentNumber.trim()) {
-      setFormError('Completa teléfono y documento.')
+    if (!documentNumber.trim()) {
+      setFormError('Ingresa tu número de documento.')
+      return
+    }
+    lookupMutation.mutate({
+      document_type: documentType,
+      document_number: documentNumber.trim(),
+    })
+  }
+
+  const submitConfirmedCall = () => {
+    setFormError(null)
+    setSuccessMessage(null)
+    if (!phoneConfirmed) {
+      setFormError('Confirma que el número terminado en esos dígitos es el tuyo.')
+      return
+    }
+    if (!consent) {
+      setFormError('Debes aceptar el consentimiento de datos.')
+      return
+    }
+    if (!nombre.trim() || nombre.trim().length < 2) {
+      setFormError('Necesitamos tu nombre para continuar.')
+      return
+    }
+    const scheduledAt =
+      mode === 'schedule' ? new Date(scheduledLocal).toISOString() : undefined
+    if (mode === 'schedule' && Number.isNaN(Date.parse(scheduledLocal))) {
+      setFormError('La fecha programada no es válida.')
+      return
+    }
+    callMutation.mutate({
+      document_type: documentType,
+      document_number: documentNumber.trim(),
+      data_consent: true,
+      confirm_stored_phone: true,
+      nombre: nombre.trim(),
+      mode,
+      ...(mode === 'schedule' ? { scheduled_at: scheduledAt } : {}),
+    })
+  }
+
+  const submitRegisterCall = () => {
+    setFormError(null)
+    setSuccessMessage(null)
+    if (!nombre.trim() || !phone.trim()) {
+      setFormError('Completa nombre y teléfono.')
       return
     }
     if (!consent) {
@@ -73,14 +167,72 @@ export const HomePage = () => {
       return
     }
     callMutation.mutate({
-      phone: phone.trim(),
-      mode,
-      scheduled_at: scheduledAt,
       document_type: documentType,
       document_number: documentNumber.trim(),
       data_consent: true,
+      confirm_stored_phone: false,
+      nombre: nombre.trim(),
+      country_code: countryCode,
+      phone: phone.trim(),
+      mode,
+      ...(mode === 'schedule' ? { scheduled_at: scheduledAt } : {}),
     })
   }
+
+  const goToRegisterInstead = () => {
+    setPhoneConfirmed(false)
+    setPhone('')
+    setStep('register')
+    setFormError(null)
+  }
+
+  const modeButtons = (
+    <div className="flex flex-wrap gap-2">
+      <Button
+        type="button"
+        variant={mode === 'now' ? 'primary' : 'secondary'}
+        onClick={() => setMode('now')}
+      >
+        Ahora
+      </Button>
+      <Button
+        type="button"
+        variant={mode === 'schedule' ? 'primary' : 'secondary'}
+        onClick={() => setMode('schedule')}
+      >
+        Programar
+      </Button>
+    </div>
+  )
+
+  const scheduleField =
+    mode === 'schedule' ? (
+      <label className="block text-sm font-medium text-[var(--color-ink)]">
+        Fecha y hora
+        <input
+          type="datetime-local"
+          className="mt-1 w-full rounded-xl border border-[var(--color-line)] bg-white px-3 py-2"
+          min={minSchedule}
+          value={scheduledLocal}
+          onChange={(e) => setScheduledLocal(e.target.value)}
+        />
+      </label>
+    ) : null
+
+  const consentField = (
+    <label className="flex items-start gap-3 text-sm text-[var(--color-muted)]">
+      <input
+        type="checkbox"
+        className="mt-1"
+        checked={consent}
+        onChange={(e) => setConsent(e.target.checked)}
+      />
+      <span>
+        Autorizo el tratamiento de mis datos para orientación de vivienda y contacto
+        telefónico con Laura (CasaLista / Colsubsidio).
+      </span>
+    </label>
+  )
 
   return (
     <AppShell>
@@ -157,38 +309,12 @@ export const HomePage = () => {
             </p>
             <Button onClick={resetModal}>Listo</Button>
           </div>
-        ) : (
+        ) : step === 'document' ? (
           <div className="space-y-4">
             <p className="text-sm text-[var(--color-muted)]">
-              Misma asesora Laura y el mismo perfil que en la web. Elige si te llamamos ahora o en
-              otro momento.
+              Empieza con tu documento. Si ya estás en el sistema, te pediremos confirmar el
+              celular registrado.
             </p>
-
-            <div className="flex flex-wrap gap-2">
-              <Button
-                type="button"
-                variant={mode === 'now' ? 'primary' : 'secondary'}
-                onClick={() => setMode('now')}
-              >
-                Ahora
-              </Button>
-              <Button
-                type="button"
-                variant={mode === 'schedule' ? 'primary' : 'secondary'}
-                onClick={() => setMode('schedule')}
-              >
-                Programar
-              </Button>
-            </div>
-
-            <TextField
-              label="Celular"
-              name="phone"
-              value={phone}
-              onChange={(e) => setPhone(e.target.value)}
-              placeholder="3001234567 o +573001234567"
-              autoComplete="tel"
-            />
 
             <div className="grid gap-3 sm:grid-cols-[7rem_1fr]">
               <label className="block text-sm font-medium text-[var(--color-ink)]">
@@ -196,9 +322,7 @@ export const HomePage = () => {
                 <select
                   className="mt-1 w-full rounded-xl border border-[var(--color-line)] bg-white px-3 py-2"
                   value={documentType}
-                  onChange={(e) =>
-                    setDocumentType(e.target.value as 'CC' | 'CE' | 'PP' | 'NIT')
-                  }
+                  onChange={(e) => setDocumentType(e.target.value as DocumentType)}
                 >
                   <option value="CC">CC</option>
                   <option value="CE">CE</option>
@@ -215,44 +339,155 @@ export const HomePage = () => {
               />
             </div>
 
-            {mode === 'schedule' && (
-              <label className="block text-sm font-medium text-[var(--color-ink)]">
-                Fecha y hora
-                <input
-                  type="datetime-local"
-                  className="mt-1 w-full rounded-xl border border-[var(--color-line)] bg-white px-3 py-2"
-                  min={minSchedule}
-                  value={scheduledLocal}
-                  onChange={(e) => setScheduledLocal(e.target.value)}
-                />
-              </label>
+            {formError && <p className="text-sm text-red-600">{formError}</p>}
+
+            <div className="flex flex-wrap gap-2 pt-2">
+              <Button onClick={submitLookup} disabled={lookupMutation.isPending}>
+                {lookupMutation.isPending ? 'Buscando…' : 'Continuar'}
+              </Button>
+              <Button variant="secondary" onClick={resetModal}>
+                Cancelar
+              </Button>
+            </div>
+          </div>
+        ) : step === 'confirm' ? (
+          <div className="space-y-4">
+            <p className="text-sm text-[var(--color-muted)]">
+              {lookup?.message ||
+                'Encontramos tu documento. Confirma el celular para que Laura te llame.'}
+            </p>
+
+            {lookup?.nombre ? (
+              <p className="text-[var(--color-ink)]">
+                Hola, <span className="font-medium">{lookup.nombre}</span>
+              </p>
+            ) : (
+              <TextField
+                label="Nombre completo"
+                name="nombre"
+                value={nombre}
+                onChange={(e) => setNombre(e.target.value)}
+                placeholder="Como quieres que te salude Laura"
+                autoComplete="name"
+              />
             )}
 
-            <label className="flex items-start gap-3 text-sm text-[var(--color-muted)]">
+            <div className="rounded-xl border border-[var(--color-line)] bg-white/70 px-4 py-3">
+              <p className="text-sm text-[var(--color-muted)]">Celular registrado</p>
+              <p className="mt-1 font-medium tracking-wide text-[var(--color-ink)]">
+                ****{lookup?.phone_last4}
+              </p>
+            </div>
+
+            <label className="flex items-start gap-3 text-sm text-[var(--color-ink)]">
               <input
                 type="checkbox"
                 className="mt-1"
-                checked={consent}
-                onChange={(e) => setConsent(e.target.checked)}
+                checked={phoneConfirmed}
+                onChange={(e) => setPhoneConfirmed(e.target.checked)}
               />
               <span>
-                Autorizo el tratamiento de mis datos para orientación de vivienda y contacto
-                telefónico con Laura (CasaLista / Colsubsidio).
+                Sí, ese es mi número (terminado en {lookup?.phone_last4}). Pueden llamarme ahí.
               </span>
             </label>
+
+            {modeButtons}
+            {scheduleField}
+            {consentField}
 
             {formError && <p className="text-sm text-red-600">{formError}</p>}
 
             <div className="flex flex-wrap gap-2 pt-2">
-              <Button onClick={submitCall} disabled={callMutation.isPending}>
+              <Button onClick={submitConfirmedCall} disabled={callMutation.isPending}>
                 {callMutation.isPending
                   ? 'Enviando…'
                   : mode === 'now'
                     ? 'Llamarme ahora'
                     : 'Programar llamada'}
               </Button>
-              <Button variant="secondary" onClick={resetModal}>
-                Cancelar
+              <Button variant="secondary" onClick={goToRegisterInstead}>
+                No es mi número
+              </Button>
+              <Button
+                variant="secondary"
+                onClick={() => {
+                  setStep('document')
+                  setLookup(null)
+                  setPhoneConfirmed(false)
+                  setFormError(null)
+                }}
+              >
+                Volver
+              </Button>
+            </div>
+          </div>
+        ) : (
+          <div className="space-y-4">
+            <p className="text-sm text-[var(--color-muted)]">
+              {lookup?.known_lead
+                ? 'Ingresa el celular al que quieres que te llamemos.'
+                : 'No encontramos ese documento. Registra tu nombre y celular para continuar.'}
+            </p>
+
+            <TextField
+              label="Nombre completo"
+              name="nombre"
+              value={nombre}
+              onChange={(e) => setNombre(e.target.value)}
+              placeholder="Como quieres que te salude Laura"
+              autoComplete="name"
+            />
+
+            <div className="grid gap-3 sm:grid-cols-[8.5rem_1fr]">
+              <label className="block text-sm font-medium text-[var(--color-ink)]">
+                Indicativo
+                <select
+                  className="mt-1 w-full rounded-xl border border-[var(--color-line)] bg-white px-3 py-2"
+                  value={countryCode}
+                  onChange={(e) => setCountryCode(e.target.value)}
+                  aria-label="Indicativo de país"
+                >
+                  {COUNTRY_CODES.map((item) => (
+                    <option key={item.code} value={item.code}>
+                      {item.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <TextField
+                label="Celular"
+                name="phone"
+                value={phone}
+                onChange={(e) => setPhone(e.target.value)}
+                placeholder="3001234567"
+                autoComplete="tel-national"
+                inputMode="tel"
+              />
+            </div>
+
+            {modeButtons}
+            {scheduleField}
+            {consentField}
+
+            {formError && <p className="text-sm text-red-600">{formError}</p>}
+
+            <div className="flex flex-wrap gap-2 pt-2">
+              <Button onClick={submitRegisterCall} disabled={callMutation.isPending}>
+                {callMutation.isPending
+                  ? 'Enviando…'
+                  : mode === 'now'
+                    ? 'Llamarme ahora'
+                    : 'Programar llamada'}
+              </Button>
+              <Button
+                variant="secondary"
+                onClick={() => {
+                  setStep('document')
+                  setLookup(null)
+                  setFormError(null)
+                }}
+              >
+                Volver
               </Button>
             </div>
           </div>

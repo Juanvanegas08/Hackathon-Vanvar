@@ -209,7 +209,8 @@ def build_synthetic_person(
         .replace("ñ", "n")
         .replace(" ", "")
     )
-    email = f"{email_local}@demo.casalista.local"
+    # Use example.com so EmailStr / email-validator accept demo contacts.
+    email = f"{email_local}@example.com"
 
     is_affiliated = bool(affiliated) if affiliated is not None else True
     category = synthetic_category_for_row(row_number, is_affiliated)

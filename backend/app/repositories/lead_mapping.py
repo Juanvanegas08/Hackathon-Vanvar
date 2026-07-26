@@ -20,6 +20,7 @@ from app.models.lead import (
     LeadStatus,
     PurchaseTimeline,
 )
+from app.utils.commercial_affinity import AffinityBand, parse_commercial_snapshot
 from app.utils.profile_progress import compute_profile_progress
 
 DOMAIN_TO_DB_STATUS: dict[str, str] = {
@@ -135,6 +136,14 @@ def build_profile_columns(lead: Lead, document: dict[str, Any]) -> dict[str, Any
                     else None
                 ),
             },
+            "commercial": {
+                "affinity_percent": lead.affinity_percent,
+                "affinity_band": (
+                    lead.affinity_band.value if lead.affinity_band is not None else None
+                ),
+                "top_project_id": lead.top_project_id,
+                "top_project_name": lead.top_project_name,
+            },
         },
         "profile_document": document,
     }
@@ -194,6 +203,13 @@ def domain_lead_from_rows(
     raw_score = engagement.get("score", extras.get("engagement_score"))
     engagement_score = int(raw_score) if isinstance(raw_score, (int, float)) else None
     engagement_updated_raw = engagement.get("updated_at")
+
+    commercial_raw = None
+    if isinstance(document, dict) and isinstance(document.get("commercial"), dict):
+        commercial_raw = document.get("commercial")
+    elif isinstance(extras.get("commercial"), dict):
+        commercial_raw = extras.get("commercial")
+    commercial = parse_commercial_snapshot(commercial_raw) or {}
 
     return Lead(
         id=lead_id,
@@ -299,5 +315,13 @@ def domain_lead_from_rows(
             if isinstance(engagement_updated_raw, str)
             else None
         ),
+        affinity_percent=(
+            float(commercial["affinity_percent"])
+            if commercial.get("affinity_percent") is not None
+            else None
+        ),
+        affinity_band=enum_or_none(AffinityBand, commercial.get("affinity_band")),
+        top_project_id=commercial.get("top_project_id"),
+        top_project_name=commercial.get("top_project_name"),
         fecha_actualizacion=datetime.now(UTC),
     )

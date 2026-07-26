@@ -45,4 +45,9 @@ def recommend_projects_for_lead(
         include_unavailable=include_unavailable,
         min_score=min_score,
     )
+    if result.recommended_projects:
+        try:
+            lead_service.apply_commercial_from_recommendations(lead_id, result)
+        except Exception:  # noqa: BLE001
+            pass
     return RecommendationResponse.model_validate(result.model_dump())

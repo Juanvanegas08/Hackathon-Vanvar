@@ -88,6 +88,12 @@ class ProfilePersistenceService:
                     else None
                 ),
             },
+            "commercial": {
+                "affinity_percent": lead.affinity_percent,
+                "affinity_band": self._enum(lead.affinity_band),
+                "top_project_id": lead.top_project_id,
+                "top_project_name": lead.top_project_name,
+            },
             "field_provenance": {
                 field: {
                     "source": self._enum(meta.source),

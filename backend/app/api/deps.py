@@ -13,6 +13,7 @@ from app.services.affiliation_service import AffiliationService
 from app.services.identity_service import IdentityService
 from app.services.lead_service import LeadService
 from app.services.phone_call_orchestrator import PhoneCallOrchestrator
+from app.services.phone_call_session_store import PhoneCallSessionStore
 from app.services.project_profile_service import ProjectProfileService
 from app.services.question_service import QuestionService
 from app.services.readiness_service import ReadinessService
@@ -128,6 +129,12 @@ def get_voice_orchestration_service() -> VoiceOrchestrationService:
 def get_scheduled_call_service() -> ScheduledCallService:
     """Return process-wide scheduled call store."""
     return ScheduledCallService()
+
+
+@lru_cache
+def get_phone_call_session_store() -> PhoneCallSessionStore:
+    """Return process-wide phone agent session store."""
+    return PhoneCallSessionStore()
 
 
 def get_twilio_call_service() -> TwilioCallService:

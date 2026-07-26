@@ -7,6 +7,9 @@ from uuid import UUID, uuid4
 
 from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
 
+from app.utils.commercial_affinity import AffinityBand
+from app.utils.email import sanitize_optional_email
+
 
 class LeadStatus(StrEnum):
     """Lifecycle states for a lead profile."""
@@ -181,6 +184,18 @@ class Lead(BaseModel):
     engagement_score: int | None = Field(default=None, ge=0, le=100)
     engagement_reason: str | None = None
     engagement_updated_at: datetime | None = None
+
+    # Commercial housing affinity (top recommended project compatibility).
+    affinity_percent: float | None = Field(default=None, ge=0, le=100)
+    affinity_band: AffinityBand | None = None
+    top_project_id: str | None = None
+    top_project_name: str | None = None
+
+    @field_validator("correo", mode="before")
+    @classmethod
+    def coerce_correo(cls, value: object) -> str | None:
+        """Drop reserved/demo domains (e.g. .local) instead of failing the lead."""
+        return sanitize_optional_email(value)
 
     @field_validator(
         "salario_mensual",

@@ -139,6 +139,7 @@ class VoiceOrchestrationService:
             profile_completed=profile_completed,
             progress=progress,
             next_question=next_response.next_question,
+            upcoming_questions=self._questions.list_upcoming_questions(lead, limit=2),
             conversation_opening=opening,
             confirmed_fields=self._confirmed_fields(lead),
             fields_to_confirm=list(lead.fields_to_confirm),
@@ -222,21 +223,31 @@ class VoiceOrchestrationService:
                 progress=compute_profile_progress(lead),
             )
 
-        if self._looks_like_non_answer_transcript(payload.raw_transcript):
+        # Proyecto opcional: "lo que me recomiendes" / skip no debe trabar el flujo.
+        if expected.field == "proyecto_interes" and (
+            payload.action == "skip"
+            or self._looks_like_project_deferral(payload.raw_transcript)
+        ):
+            payload = payload.model_copy(
+                update={
+                    "action": "answer",
+                    "normalized_value": "sin preferencia",
+                    "raw_transcript": payload.raw_transcript
+                    or "sin preferencia",
+                }
+            )
+        elif self._looks_like_non_answer_transcript(payload.raw_transcript):
             is_question = self._looks_like_user_question(payload.raw_transcript)
             return VoiceAnswerResponse(
                 accepted=False,
                 clarification_required=True,
                 assistant_guidance=(
-                    "El usuario está preguntando o pidiendo aclaración. "
-                    "Responde primero con sustancia a su duda (2–5 frases) "
-                    "y solo después retoma la pregunta activa "
-                    f"sobre {expected.field}."
+                    "El usuario pregunta. Contesta en 1–2 frases cortas y retoma "
+                    f"la pregunta activa ({expected.field}). Sin menús ni esperas."
                     if is_question
                     else (
-                        "Eso no responde la pregunta actual. "
-                        "Aclara breve si hace falta y vuelve a preguntar "
-                        f"sobre {expected.field} hasta obtener una respuesta válida."
+                        "No fue una respuesta usable. Repregunta en una frase corta "
+                        f"el campo {expected.field}. Sin 'un segundo' ni menús."
                     )
                 ),
                 validation_message=(
@@ -263,10 +274,11 @@ class VoiceOrchestrationService:
 
         refreshed = self._leads.get_lead(lead.id)
         following = self._questions.get_next_question(refreshed)
+        upcoming = self._questions.list_upcoming_questions(refreshed, limit=2)
         progress = compute_profile_progress(refreshed)
         completed = bool(following.completed)
         guidance = (
-            "Cierra con naturalidad y finaliza el perfilamiento."
+            "Perfil completo. Llama complete_voice_profile y lee solo el cierre."
             if completed
             else self._guidance_for(following.next_question)
         )
@@ -276,6 +288,7 @@ class VoiceOrchestrationService:
             profile_completed=completed,
             progress=progress,
             next_question=following.next_question,
+            upcoming_questions=upcoming,
             assistant_guidance=guidance,
             warnings=[],
         )
@@ -329,6 +342,14 @@ class VoiceOrchestrationService:
                         "reason": first.reason or "",
                         "brochure_url": first.brochure_url or "",
                     }
+                    try:
+                        self._leads.apply_commercial_from_recommendations(
+                            lead_id,
+                            recommendations,
+                            persist=False,
+                        )
+                    except Exception:  # noqa: BLE001
+                        pass
             except Exception:  # noqa: BLE001
                 # El cierre de voz no debe fallar solo porque el recomendador tarde o falle.
                 recommendations = None
@@ -355,12 +376,12 @@ class VoiceOrchestrationService:
                 "Encontré tres opciones que pueden ajustarse a ti."
             )
         if spoken_summary:
-            # Preferir el texto oral completo de Laura (ya incluye apertura amigable).
+            # Preferir el texto oral completo de Laura sin reescribirlo (evita cortes raros en TTS).
             closing = spoken_summary.strip()
-            if not closing.lower().startswith("según la charla"):
+            if closing and not closing.lower().startswith("según la charla"):
                 closing = (
-                    "Según la charla que tuve contigo, y después de revisar "
-                    f"los proyectos del catálogo, {closing[0].lower() + closing[1:] if closing else closing}"
+                    "Según la charla que tuve contigo, "
+                    f"{closing[0].lower() + closing[1:] if closing else closing}"
                 )
 
         # Persist completed profile into the configured repository (Postgres when enabled).
@@ -425,6 +446,23 @@ class VoiceOrchestrationService:
         payload: VoiceAnswerRequest,
     ) -> Lead:
         if payload.action == "skip":
+            # Campos opcionales deben quedar "respondidos" para no repetir la pregunta.
+            if not question.required and question.field == "proyecto_interes":
+                return self._leads.apply_lead_updates(
+                    lead.id,
+                    {
+                        "proyecto_interes": "sin preferencia",
+                        "field_metadata": {
+                            "proyecto_interes": FieldProvenance(
+                                source=DataSource.USER_DECLARED,
+                                confirmed=True,
+                                requires_confirmation=False,
+                                updated_at=datetime.now(UTC),
+                                previous_value=getattr(lead, "proyecto_interes", None),
+                            )
+                        },
+                    },
+                )
             return lead
         value = self._coerce_value(
             question.field,
@@ -572,6 +610,7 @@ class VoiceOrchestrationService:
 
     @staticmethod
     def _looks_like_user_question(raw: str | None) -> bool:
+        """Detect real user doubts — avoid false positives on answers with 'cuánto'."""
         if raw is None:
             return False
         text = raw.strip().lower()
@@ -579,44 +618,48 @@ class VoiceOrchestrationService:
             return False
         if "?" in text or "¿" in text:
             return True
-        hints = (
-            "aclara",
-            "explica",
+        # Frases claras de duda (no bastan palabras sueltas tipo "cuánto"/"dónde").
+        doubt_phrases = (
+            "una duda",
+            "tengo una duda",
+            "una pregunta",
+            "tengo una pregunta",
             "qué significa",
             "que significa",
             "no entend",
-            "una duda",
-            "una pregunta",
-            "quiero saber",
-            "puedes decirme",
-            "me puedes",
-            "qué es",
-            "que es",
-            "cómo funciona",
-            "como funciona",
-            "cuánto",
-            "cuanto",
-            "dónde",
-            "donde",
-            "cuál",
-            "cual ",
-            "por qué",
-            "por que",
+            "no te entend",
             "puedes repetir",
+            "puedes explicar",
+            "me puedes explicar",
+            "quiero saber",
+            "quisiera saber",
             "qué quieres decir",
             "que quieres decir",
-            "me recomiendas",
-            "se puede",
-            "hay forma",
+            "me recomiendas algo",
+            "qué me recomiendas",
+            "que me recomiendas",
+            "hay forma de",
+            "cómo funciona",
+            "como funciona",
+            "qué es eso",
+            "que es eso",
+            "aclara",
+            "explica un poco",
         )
-        if any(hint in text for hint in hints):
+        if any(phrase in text for phrase in doubt_phrases):
             return True
-        return bool(
-            re.match(
-                r"^(qué|que|cómo|como|cuánto|cuanto|dónde|donde|cuál|cual|por\s*qué|por\s*que)\b",
+        # Solo al inicio, y si no parece respuesta (números / sí-no / montos).
+        if re.match(
+            r"^(qué|que|cómo|como|cuánto|cuanto|dónde|donde|cuál|cual|por\s*qué|por\s*que)\b",
+            text,
+        ):
+            if re.search(
+                r"\d|mill[oó]n|mil\b|pesos|s[ií]\b|\bno\b|aprox|alrededor",
                 text,
-            )
-        )
+            ):
+                return False
+            return True
+        return False
 
     @staticmethod
     def _looks_like_non_answer_transcript(raw: str | None) -> bool:
@@ -670,24 +713,64 @@ class VoiceOrchestrationService:
 
     @staticmethod
     def _opening_message(lead: Lead, display_name: str | None) -> str:
-        name = display_name or "hola"
+        name = display_name or ""
+        hello = f"Hola {name}" if name else "Hola"
         if lead.known_lead and lead.afiliado:
             return (
-                f"Hola {name}, soy Laura, asesora de Colsubsidio. "
-                "Estoy aquí para ayudarte a elegir la mejor opción de vivienda; "
-                "ya tenemos algo de tu perfil, así que esto va a ser más cortico."
+                f"{hello}, soy Laura, asesora de Colsubsidio. "
+                "Para orientarte bien con vivienda, te haré unas preguntas cortas; "
+                "toma más o menos dos o tres minutos. "
+                "¿Te parece si lo hacemos ahora, o prefieres más tarde?"
             )
         if lead.known_lead and lead.afiliado is False:
             return (
-                f"Hola {name}, soy Laura, asesora de Colsubsidio. "
-                "Te acompaño a tomar una buena decisión de vivienda; "
-                "ya vimos un poco de información y armamos juntos tu orientación."
+                f"{hello}, soy Laura, asesora de Colsubsidio. "
+                "Te acompaño a mirar opciones de vivienda con unas preguntas sencillas; "
+                "son como dos o tres minutos. "
+                "¿Te late hacerlo ahora, o lo dejamos para después?"
             )
         return (
-            f"Hola{(' ' + name) if display_name else ''}, soy Laura, "
-            "asesora de Colsubsidio. Estoy para ayudarte a escoger la vivienda "
-            "que mejor te quede; vamos paso a paso, una pregunta a la vez."
+            f"{hello}, soy Laura, asesora de Colsubsidio. "
+            "Quiero ayudarte a escoger vivienda con una charla corta: "
+            "unas preguntas sencillas, más o menos dos o tres minutos. "
+            "¿Te parece si arrancamos ahora, o prefieres más tarde?"
         )
+
+    @staticmethod
+    def _looks_like_project_deferral(raw: str | None) -> bool:
+        if raw is None:
+            return False
+        text = raw.strip().lower()
+        if not text:
+            return False
+        phrases = (
+            "lo que me recomiend",
+            "lo que tu recomiend",
+            "lo que tú recomiend",
+            "tú decides",
+            "tu decides",
+            "como veas",
+            "como tú veas",
+            "como tu veas",
+            "da igual",
+            "el que sea",
+            "la que sea",
+            "no tengo",
+            "ninguno",
+            "ninguna",
+            "no sé",
+            "no se",
+            "sin preferencia",
+            "me da igual",
+            "tú me orient",
+            "tu me orient",
+            "que me orientes",
+            "qué me orientes",
+            "abierto",
+            "después me dices",
+            "lo que haya",
+        )
+        return any(p in text for p in phrases)
 
     @staticmethod
     def _confirmed_fields(lead: Lead) -> list[str]:
@@ -700,15 +783,11 @@ class VoiceOrchestrationService:
     @staticmethod
     def _guidance_for(question: NextQuestion | None) -> str:
         if question is None:
-            return "Continúa con la siguiente pregunta del backend."
-        if question.type == QuestionFieldType.CONFIRMATION:
-            return (
-                "Pide confirmación del dato precargado sin revelar cifras "
-                "sensibles innecesarias."
-            )
+            return "Di la siguiente pregunta corta del next_question."
         return (
-            "Reconoce con naturalidad (sin decir gracias) y pregunta: "
-            f"{question.question}"
+            "Di SOLO la siguiente pregunta en ≤12 palabras (reformulada, sencilla). "
+            f"Campo activo: {question.field}. Intención: {question.question}. "
+            "Prohibido: muletillas, eco, 'un segundo', 'voy a analizar', menús."
         )
 
     @staticmethod
