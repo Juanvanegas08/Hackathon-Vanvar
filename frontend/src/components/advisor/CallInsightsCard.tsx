@@ -14,17 +14,30 @@ export const CallInsightsCard = ({ insights }: { insights: CallInsight[] }) => (
     </p>
     <h3 className="mt-2 font-display text-2xl">Hallazgos útiles para el cierre</h3>
     <div className="mt-5 space-y-3">
-      {insights.map((item) => (
-        <div
-          key={item.label}
-          className={cn('rounded-2xl border-l-4 px-4 py-3', toneClass[item.tone])}
-        >
-          <p className="text-xs font-semibold uppercase tracking-wide text-[var(--color-muted)]">
-            {item.label}
-          </p>
-          <p className="mt-1 text-sm text-[var(--color-ink)]">{item.value}</p>
-        </div>
-      ))}
+      {insights.map((item) => {
+        const Icon = item.Icon
+        return (
+          <div
+            key={item.label}
+            className={cn('rounded-2xl border-l-4 px-4 py-3', toneClass[item.tone])}
+          >
+            <p className="text-xs font-semibold uppercase tracking-wide text-[var(--color-muted)]">
+              {item.label}
+            </p>
+            <p className="mt-1 flex items-start gap-2 text-sm text-[var(--color-ink)]">
+              {Icon ? (
+                <Icon
+                  size={18}
+                  strokeWidth={1.75}
+                  aria-hidden
+                  className="mt-0.5 shrink-0 opacity-80"
+                />
+              ) : null}
+              <span>{item.value}</span>
+            </p>
+          </div>
+        )
+      })}
     </div>
   </section>
 )

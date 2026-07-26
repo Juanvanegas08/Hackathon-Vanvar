@@ -10,6 +10,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import ValidationError
+from sqlalchemy.exc import InterfaceError, OperationalError
 
 from app.api.deps import get_phone_call_orchestrator
 from app.api.router import build_api_router
@@ -149,6 +150,28 @@ def register_exception_handlers(application: FastAPI) -> None:
         return JSONResponse(
             status_code=422,
             content={"detail": exc.errors(), "code": "validation_error"},
+        )
+
+    @application.exception_handler(OperationalError)
+    @application.exception_handler(InterfaceError)
+    async def database_error_handler(
+        request: Request,
+        exc: Exception,
+    ) -> JSONResponse:
+        logger.exception(
+            "Database unavailable path=%s error=%s",
+            request.url.path,
+            type(exc).__name__,
+        )
+        return JSONResponse(
+            status_code=503,
+            content={
+                "detail": (
+                    "No pudimos conectar con la base de datos. "
+                    "Verifica la VPN o que Postgres esté disponible e inténtalo de nuevo."
+                ),
+                "code": "database_unavailable",
+            },
         )
 
 app = create_app()

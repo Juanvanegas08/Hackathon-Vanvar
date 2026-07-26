@@ -383,19 +383,23 @@ export const OpenAIRealtimeVoiceSessionProvider = ({ children }: PropsWithChildr
     } catch (err) {
       await cleanup()
       const message = getErrorMessage(err)
+      const lower = message.toLowerCase()
       const code =
         typeof err === 'object' && err && 'code' in err
           ? String((err as { code?: string }).code ?? 'voice_start_failed')
-          : message.toLowerCase().includes('permission') ||
-              message.toLowerCase().includes('notallowed')
+          : lower.includes('permission') || lower.includes('notallowed')
             ? 'microphone_denied'
-            : 'voice_start_failed'
+            : lower.includes('tardó demasiado') || lower.includes('timeout')
+              ? 'voice_start_timeout'
+              : 'voice_start_failed'
       setError({
         code,
         message:
           code === 'microphone_denied'
             ? 'Necesitamos permiso del micrófono para continuar por voz. Pulsa Iniciar conversación e acéptalo.'
-            : 'No pudimos iniciar la conversación de voz. Inténtalo de nuevo.',
+            : code === 'voice_start_timeout'
+              ? 'La conexión con el servicio de voz tardó demasiado. Inténtalo de nuevo.'
+              : 'No pudimos iniciar la conversación de voz. Inténtalo de nuevo.',
       })
       setVoiceState('error')
     }

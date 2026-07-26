@@ -5,6 +5,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, Field
 
+from app.models.lead import EngagementLabel
 from app.schemas.evaluation import NextQuestion
 
 
@@ -59,17 +60,7 @@ class VoiceAnswerResponse(BaseModel):
 class VoiceCompleteRequest(BaseModel):
     """Optional engagement snapshot to persist when closing the voice profile."""
 
-    engagement_label: (
-        Literal[
-            "interesado",
-            "indeciso",
-            "molesto",
-            "trolleando",
-            "ocupado",
-            "desconocido",
-        ]
-        | None
-    ) = None
+    engagement_label: EngagementLabel | None = None
     engagement_score: int | None = Field(default=None, ge=0, le=100)
     engagement_reason: str | None = Field(default=None, max_length=400)
 
@@ -93,14 +84,7 @@ class VoiceCompleteResponse(BaseModel):
 
 
 class VoiceEngagementRequest(BaseModel):
-    label: Literal[
-        "interesado",
-        "indeciso",
-        "molesto",
-        "trolleando",
-        "ocupado",
-        "desconocido",
-    ]
+    label: EngagementLabel
     score: int | None = Field(default=None, ge=0, le=100)
     reason: str | None = Field(default=None, max_length=400)
 
