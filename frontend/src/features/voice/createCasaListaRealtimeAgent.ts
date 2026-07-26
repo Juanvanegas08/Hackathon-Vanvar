@@ -472,9 +472,9 @@ export const createCasaListaRealtimeAgent = (options: CasaListaAgentOptions) => 
           engagement_reason,
         })
         if (result.completed) {
-          window.setTimeout(() => {
-            onProfileCompleted?.(result.navigation_path)
-          }, 80)
+          // Armar navegación YA (antes de devolver el JSON) para no perder el
+          // audio_start del cierre y quedarnos sin ir a /results.
+          onProfileCompleted?.(result.navigation_path)
         }
         return JSON.stringify({
           completed: result.completed,

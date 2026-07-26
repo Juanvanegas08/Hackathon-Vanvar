@@ -59,7 +59,15 @@ export const ConversationPage = () => {
     const handler = (path: string) => {
       navigate(path)
     }
-    window.dispatchEvent(new CustomEvent('casalista-voice-navigate', { detail: handler }))
+    const publish = () => {
+      window.dispatchEvent(
+        new CustomEvent('casalista-voice-navigate', { detail: handler }),
+      )
+    }
+    publish()
+    // Si el provider de voz monta después, vuelve a registrar el navigate.
+    window.addEventListener('casalista-voice-ready', publish)
+    return () => window.removeEventListener('casalista-voice-ready', publish)
   }, [navigate])
 
   const leadQuery = useQuery({

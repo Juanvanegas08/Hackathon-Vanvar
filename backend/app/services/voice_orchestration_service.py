@@ -34,6 +34,7 @@ from app.services.lead_service import LeadService
 from app.services.question_service import QuestionService
 from app.services.recommendation_service import RecommendationService
 from app.utils.profile_progress import compute_profile_progress
+from app.utils.commercial_affinity import AffinityBand, classify_affinity
 
 CURRENCY_FIELDS = {
     "salario_mensual",
@@ -214,6 +215,27 @@ class VoiceOrchestrationService:
                 score=max(0, min(100, resolved_score)),
                 reason=resolved_reason,
             ),
+        )
+
+    def _mark_evaluated_without_projects(
+        self,
+        lead_id: UUID,
+        *,
+        readiness_score: float | int | None = None,
+    ) -> None:
+        """Ensure the lead appears in the advisor queue even without project matches."""
+        lead = self._leads.get_lead(lead_id)
+        if lead.affinity_percent is not None or lead.affinity_band is not None:
+            return
+        score = float(readiness_score) if readiness_score is not None else 40.0
+        score = max(0.0, min(100.0, score))
+        band = classify_affinity(score) or AffinityBand.POR_EVALUAR
+        self._leads.apply_lead_updates(
+            lead_id,
+            {
+                "affinity_percent": round(score, 2),
+                "affinity_band": band,
+            },
         )
 
     def submit_answer(
@@ -410,6 +432,15 @@ class VoiceOrchestrationService:
                         )
                     except Exception:  # noqa: BLE001
                         pass
+                else:
+                    # Sin proyectos: igual marcar evaluado para que aparezca en cola.
+                    try:
+                        self._mark_evaluated_without_projects(
+                            lead_id,
+                            readiness_score=readiness.readiness_score,
+                        )
+                    except Exception:  # noqa: BLE001
+                        pass
             except Exception:  # noqa: BLE001
                 # El cierre de voz no debe fallar solo porque el recomendador tarde o falle.
                 recommendations = None
@@ -418,6 +449,21 @@ class VoiceOrchestrationService:
                     "vas a ver las opciones recomendadas en un momento."
                 )
                 engine = "deferred"
+                try:
+                    self._mark_evaluated_without_projects(
+                        lead_id,
+                        readiness_score=readiness.readiness_score,
+                    )
+                except Exception:  # noqa: BLE001
+                    pass
+        else:
+            try:
+                self._mark_evaluated_without_projects(
+                    lead_id,
+                    readiness_score=readiness.readiness_score,
+                )
+            except Exception:  # noqa: BLE001
+                pass
 
         closing = (
             "Ya terminé de construir tu perfil. "
