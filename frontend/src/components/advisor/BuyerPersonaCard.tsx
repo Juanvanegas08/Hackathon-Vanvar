@@ -33,5 +33,23 @@ export const BuyerPersonaCard = ({ persona }: { persona: BuyerPersona }) => (
       <p className="text-sm font-semibold text-[var(--color-blue)]">Ángulo de cierre</p>
       <p className="mt-1 text-sm text-[var(--color-ink)]">{persona.closingAngle}</p>
     </div>
+    {persona.pptxHref && persona.pptxSlide != null && (
+      <p className="mt-4 text-sm">
+        <a
+          href={persona.pptxHref}
+          target="_blank"
+          rel="noreferrer"
+          className="font-semibold text-[var(--color-blue)] underline underline-offset-2 hover:opacity-80"
+        >
+          Ver en Buyer Person (diapositiva {persona.pptxSlide}
+          {persona.projectName ? ` · ${persona.projectName}` : ''})
+        </a>
+      </p>
+    )}
+    {persona.projectName && !persona.historicalAvailable && !persona.pptxHref && (
+      <p className="mt-4 text-sm text-[var(--color-muted)]">
+        Sin buyer persona histórico para este proyecto.
+      </p>
+    )}
   </section>
 )

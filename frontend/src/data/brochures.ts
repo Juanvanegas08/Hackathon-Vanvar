@@ -216,3 +216,85 @@ export const BROCHURES: BrochureItem[] = [
     resumen: 'Te acompañamos con asesoría y soluciones integrales de vivienda para cumplir tu sueño. tu proyectode vida Un espacio para vivir… y para comenzar lo que siempre soñaste, Chía /gid00001/gid00015/gid00042/gid00034/gid00028/gid00039/gid00032/gid00046 /gid00013/gid00042/gid00046 /gid0',
   },
 ]
+
+const normalizeProjectKey = (value: string) =>
+  value
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-|-$/g, '')
+
+const BROCHURE_ALIASES: Record<string, string> = {
+  'hacienda-los-arrayanes': 'bosque-arrayan',
+  arrayanes: 'bosque-arrayan',
+  'altos-del-sol': 'versalles',
+  altos: 'versalles',
+  'bosques-cajica': 'inari',
+  bosques: 'inari',
+  'la-reserva': 'reserva-aguayacan',
+  reserva: 'reserva-aguayacan',
+  'parque-verde': 'bosque-turpial',
+  parque: 'bosque-turpial',
+  'villas-bosa': 'la-macarena',
+  'bosa-verde': 'la-macarena',
+  bosa: 'la-macarena',
+}
+
+/** Resuelve brochure Heyzine por id/nombre de proyecto. */
+export const findBrochureForProject = (input: {
+  projectId?: string | null
+  canonicalId?: string | null
+  projectName?: string | null
+  brochureUrl?: string | null
+}): BrochureItem | null => {
+  if (input.brochureUrl?.includes('heyzine.com')) {
+    const byUrl = BROCHURES.find((item) => item.url === input.brochureUrl)
+    if (byUrl) return byUrl
+  }
+
+  const keys = [input.projectId, input.canonicalId, input.projectName]
+    .filter((value): value is string => Boolean(value?.trim()))
+    .map(normalizeProjectKey)
+
+  for (const key of keys) {
+    const aliasId = BROCHURE_ALIASES[key]
+    if (aliasId) {
+      const aliased = BROCHURES.find((item) => item.id === aliasId)
+      if (aliased) return aliased
+    }
+
+    const match = BROCHURES.find((item) => {
+      const idKey = normalizeProjectKey(item.id)
+      const nameKey = normalizeProjectKey(item.proyecto)
+      return (
+        key === idKey ||
+        key === nameKey ||
+        key.includes(idKey) ||
+        idKey.includes(key) ||
+        key.includes(nameKey) ||
+        nameKey.includes(key)
+      )
+    })
+    if (match) return match
+  }
+
+  return null
+}
+
+/** Siempre devuelve una URL de brochure (fallback: Multiproyecto). */
+export const resolveBrochureUrl = (input: {
+  projectId?: string | null
+  canonicalId?: string | null
+  projectName?: string | null
+  brochureUrl?: string | null
+}): string => {
+  const found = findBrochureForProject(input)
+  if (found) return found.url
+  if (input.brochureUrl) return input.brochureUrl
+  return (
+    BROCHURES.find((item) => item.id === 'multiproyecto')?.url ??
+    BROCHURES[0]?.url ??
+    'https://heyzine.com/flip-book/1de36642fc.html'
+  )
+}

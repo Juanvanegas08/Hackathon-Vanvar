@@ -3,7 +3,8 @@
 from uuid import UUID
 
 from app.core.exceptions import InvalidSmmlvError, NotFoundError
-from app.models.lead import AffiliationCategory, Lead
+from app.models.lead import AffiliationCategory, Lead, LeadStatus
+from app.models.recommendation import ProjectRecommendation, RecommendationResult
 from app.repositories.lead_repository import LeadRepository
 from app.schemas.evaluation import (
     AdvisorSummaryResponse,
@@ -15,6 +16,7 @@ from app.services.affiliation_service import AffiliationService
 from app.services.question_service import QuestionService
 from app.services.readiness_service import ReadinessService
 from app.services.summary_service import SummaryService
+from app.utils.commercial_affinity import AffinityBand, classify_affinity
 
 
 class LeadService:
@@ -45,6 +47,17 @@ class LeadService:
     def list_leads(self) -> list[Lead]:
         return self._repository.list_all()
 
+    def list_advisor_queue(self) -> list[Lead]:
+        """Return compact evaluated leads for the advisor dashboard queue."""
+        list_fn = getattr(self._repository, "list_advisor_queue", None)
+        if callable(list_fn):
+            return [Lead.model_validate(item) for item in list_fn()]
+        return [
+            lead
+            for lead in self._repository.list_all()
+            if lead.affinity_percent is not None or lead.affinity_band is not None
+        ]
+
     def get_lead(self, lead_id: UUID) -> Lead:
         lead = self._repository.get_by_id(lead_id)
         if lead is None:
@@ -70,6 +83,39 @@ class LeadService:
         lead = self.get_lead(lead_id)
         return self._repository.save_profile(lead)
 
+    def apply_commercial_from_recommendations(
+        self,
+        lead_id: UUID,
+        recommendations: RecommendationResult | list[ProjectRecommendation],
+        *,
+        persist: bool = True,
+    ) -> Lead:
+        """Persist top-project affinity snapshot for the advisor queue."""
+        projects = (
+            recommendations.recommended_projects
+            if isinstance(recommendations, RecommendationResult)
+            else recommendations
+        )
+        if not projects:
+            return self.get_lead(lead_id)
+
+        top = projects[0]
+        band = classify_affinity(top.compatibility_score)
+        updates: dict[str, object] = {
+            "affinity_percent": round(float(top.compatibility_score), 2),
+            "affinity_band": band,
+            "top_project_id": top.canonical_project_id or top.project_id,
+            "top_project_name": top.project_name,
+        }
+        # Only promote to listo_para_asesor when housing affinity is high.
+        if band == AffinityBand.LISTO:
+            updates["estado_lead"] = LeadStatus.LISTO_PARA_ASESOR
+
+        updated = self.apply_lead_updates(lead_id, updates)
+        if persist:
+            return self._repository.save_profile(updated)
+        return updated
+
     def delete_lead(self, lead_id: UUID) -> None:
         deleted = self._repository.delete(lead_id)
         if not deleted:
@@ -91,10 +137,19 @@ class LeadService:
         self._repository.update(updated)
         return ReadinessResponse.model_validate(result.model_dump())
 
-    def summary(self, lead_id: UUID) -> AdvisorSummaryResponse:
+    def summary(
+        self,
+        lead_id: UUID,
+        *,
+        include_recommendations: bool = True,
+    ) -> AdvisorSummaryResponse:
         lead = self.get_lead(lead_id)
         readiness = self._readiness.evaluate(lead)
-        return self._summary.build_summary(lead, readiness)
+        return self._summary.build_summary(
+            lead,
+            readiness,
+            include_recommendations=include_recommendations,
+        )
 
     def _enrich_category(self, lead: Lead) -> Lead:
         category = self._safe_category(lead)

@@ -80,7 +80,18 @@ export interface VoiceCompleteResponse {
   }>
   profile_json_path?: string | null
   engine?: string | null
+  engagement_label?: string | null
+  engagement_score?: number | null
+  engagement_reason?: string | null
 }
+
+export type EngagementLabel =
+  | 'interesado'
+  | 'indeciso'
+  | 'molesto'
+  | 'trolleando'
+  | 'ocupado'
+  | 'desconocido'
 
 export const createRealtimeClientSecret = async (leadId: string) =>
   (
@@ -96,23 +107,22 @@ export const submitVoiceAnswer = async (leadId: string, payload: VoiceAnswerPayl
   (await apiClient.post<VoiceAnswerResponse>(`/api/v1/voice/leads/${leadId}/answer`, payload))
     .data
 
-export const completeVoiceProfile = async (leadId: string) =>
+export const completeVoiceProfile = async (
+  leadId: string,
+  payload?: {
+    engagement_label?: EngagementLabel | null
+    engagement_score?: number | null
+    engagement_reason?: string | null
+  },
+) =>
   (
     await apiClient.post<VoiceCompleteResponse>(
       `/api/v1/voice/leads/${leadId}/complete`,
       // El cierre llama al recomendador OpenAI; suele tardar >15s del timeout global.
-      undefined,
+      payload ?? {},
       { timeout: 90_000 },
     )
   ).data
-
-export type EngagementLabel =
-  | 'interesado'
-  | 'indeciso'
-  | 'molesto'
-  | 'trolleando'
-  | 'ocupado'
-  | 'desconocido'
 
 export interface VoiceEngagementPayload {
   label: EngagementLabel

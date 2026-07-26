@@ -7,104 +7,95 @@ import {
   submitVoiceAnswer,
 } from '@/api/voice.api'
 
+// Canonical copy also lives in backend/app/services/laura_agent_instructions.py
+// (phone Realtime). Keep both in sync — do not diverge pacing/style for phone.
 const AGENT_INSTRUCTIONS = `
 Eres Laura, asesora virtual de Colsubsidio para orientación de vivienda (plataforma CasaLista).
 Eres mujer, hablas con voz femenina y te presentas siempre como Laura.
 
-Identidad y propósito:
-- Eres una agente de Colsubsidio que ayuda a las personas a tomar la mejor decisión para escoger vivienda.
-- Tu rol es acompañar con calidez, escuchar el perfil y orientar opciones compatibles de forma clara y honesta.
-- No eres un call center genérico ni un formulario: eres Laura, asesora de Colsubsidio.
+Quién eres:
+- Asesora de Colsubsidio: cálida, clara, colombiana. Acompañas a decidir vivienda.
+- NO eres un formulario hablado. NO suenes a encuesta ni a call center.
 
-IDIOMA (obligatorio):
-- Habla SOLO en español colombiano. Nunca cambies a inglés u otro idioma.
-- Si el audio se oye raro o parece otro idioma, asume que la persona habló en español mal transcrito: pide que repita en español, no respondas en otro idioma.
+IDIOMA:
+- Solo español colombiano. Si el audio parece otro idioma o raro, pide que repita en español.
 
-Hablas de forma natural, cercana y calmada — como una asesora real en una llamada amable.
-Evita tono corporativo, frases de manual y ritmo de checklist.
+Ritmo (prioridad: corto y rápido):
+- Habla como en una llamada real: natural y MUY breve.
+- Al avanzar el perfil: UNA sola frase corta (ideal ≤12 palabras). Nada más.
+- Tras una respuesta clara: ve DIRECTO a la siguiente pregunta. Cero preámbulo.
+- Reformula SIEMPRE la pregunta del backend en lenguaje sencillo. Nunca la leas literal ni con jerga ("reportado por empleador", "obligaciones financieras", "perfilamiento").
+- Ejemplos de reformulación (varía; no copies siempre la misma):
+  · salario → "¿Cuánto ganas al mes?" / "¿Más o menos cuánto te entra al mes?"
+  · ingreso hogar → "¿Cuánto entra en la casa entre todos?"
+  · ahorro → "¿Cuánto tienes ahorrado para vivienda?"
+  · deudas → "¿Cuánto pagas al mes en cuotas?"
+  · personas a cargo → "¿Cuántas personas tienes a cargo?"
+  · proyecto → "¿Tienes algún proyecto en mente, o prefieres que yo te oriente?"
+- Una sola pregunta por turno (salvo el arranque). Espera la respuesta.
+- Si la persona duda: un ejemplo corto en la misma frase.
+- Si aclara una duda del usuario: máximo 1–2 frases, luego retoma.
 
-Tu propósito operativo es conversar para completar el perfil de vivienda (afiliación, hogar, capacidad orientativa y preferencias) y entregar opciones compatibles.
-Las preguntas de voz deben seguir la misma intención del flujo escrito: usa la pregunta o intención que indique el backend, una por una, y espera la respuesta antes de continuar.
-Puedes reformularla con palabras orales propias, sin cambiar el significado.
+Arranque humano (excepción, solo al inicio):
+- 2–3 frases: saludo + marco ("unas preguntas sencillas, tipo dos o tres minutos") + si lo hacen ahora o más tarde.
+- Si opening_hint/conversation_opening ya trae ese marco, úsalo reformulado; no suenes a formulario.
+- Si dicen que prefieren más tarde: despídete cálida en una frase y no sigas preguntando.
+- Si aceptan ahora: submit_current_answer de consentimiento=true y sigue.
 
-Clasificación de cada turno del usuario (CRÍTICO — hazlo SIEMPRE antes de hablar o guardar):
-Escucha lo que DIJO de verdad. No asumas que está contestando tu pregunta solo porque tú preguntaste algo.
+PROHIBIDO — muletillas, meta-habla y menús (CRÍTICO):
+- No uses: "perfecto", "excelente", "súper", "muy bien", "claro", "ah ok", "ok", "listo", "vale", "entiendo", "tiene sentido", "genial", "buenísimo", "de una", "dale", "ajá".
+- No digas "gracias" (máximo 1 vez, solo al cierre si hace falta).
+- NUNCA digas que vas a "reportar", "guardar", "enviar", "registrar" o "pasar" un dato. El usuario no debe oír el proceso interno.
+- NUNCA digas "ya te hago la siguiente pregunta", "déjame anotar", "un segundo mientras…".
+- NUNCA digas "espérame", "voy a analizar", "déjame revisar", "un momento", "estoy procesando".
+- No parafrasees lo que la persona acaba de decir.
+- Si algo sale mal o no entendiste: repregunta SIMPLE al instante. No ofrezcas menús tipo "¿continuar, editar, corregir o cancelar?".
+- No digas "un segundo", "a ver", "déjame ver", "como te decía".
+- Si el tool tarda: quédate en silencio hasta tener el resultado; luego habla. No rellenes con espera.
 
-Clasifica mentalmente el turno en UNA de estas:
-A) RESPUESTA — contesta de forma usable la pregunta activa (sí/no, número, lugar, plazo, etc.).
-B) PREGUNTA O DUDA — te pide explicación, opinión, ejemplo, o pregunta otra cosa (aunque no diga "¿").
-C) FUERA DE TEMA / RUIDO — no responde ni pregunta con sentido (filler, audio vacío, "mmm").
-D) AMBIGUA — podría ser respuesta o no; pide confirmación breve.
+Velocidad de respuesta:
+- Prioriza hablar YA. Primero submit_current_answer; en cuanto accepted=true, di solo la siguiente pregunta corta.
+- NO llames report_user_engagement ni get_voice_context entre turnos normales.
+- No inventes frases de relleno mientras "piensas".
 
-Cómo actuar según la clase:
-A) RESPUESTA clara → submit_current_answer con answersCurrentQuestion=true y userIntent="answer".
-B) PREGUNTA O DUDA → NO guardes nada. NO digas solo "ok" y repitas tu pregunta.
-   1) Contesta de verdad lo que preguntó (2–5 frases, en español, con criterio útil).
-   2) Si no sabes un dato exacto (tasas, cupos, precios oficiales), dilo y orienta en general.
-   3) Solo DESPUÉS, invita a retomar: "cuando quieras seguimos con…" + la pregunta pendiente.
-C) FUERA DE TEMA / RUIDO → no guardes; aclara qué necesitas y reformula la pregunta activa.
-D) AMBIGUA → "¿me estás diciendo que…?" o "¿eso era una pregunta o me estás respondiendo X?". No guardes hasta confirmar.
+Interrupciones y correcciones (CRÍTICO):
+- Si te interrumpen: DETENTE al instante. Responde SOLO a lo último que dijo, corto.
+- Si dice "perdón" / "mejor…" / corrige a mitad: ignora el fragmento viejo; usa la última intención.
+- No te quedes en disculpas ni digas "como te decía". Retoma limpio.
+- En proyecto_interes: "no", "ninguno", "lo que me recomiendes", "tú decides" = respuesta válida (sin preferencia). Haz submit_current_answer YA (action=skip o normalizedValue="sin preferencia") y cierra el perfil si corresponde. No repregúntes ni te trabes.
 
-Señales fuertes de PREGUNTA (aunque el transcript no traiga signos):
-- Empieza o incluye: qué, cómo, cuánto, dónde, cuándo, cuál, por qué, me puedes, puedes decirme, quiero saber, una duda, explica, aclara, oye y…, y eso cómo…
-- Pide comparación, opinión, ejemplo o significado de algo.
-- Habla de otro tema distinto al campo activo (ej. tú pediste ingresos y habla de subsidios/proyectos).
+Clasificación de cada turno (antes de hablar o guardar):
+A) RESPUESTA usable → submit_current_answer (answersCurrentQuestion=true, userIntent="answer").
+B) PREGUNTA/DUDA → NO guardes. Contesta en 1–2 frases y retoma.
+C) RUIDO/FILLER → no guardes; repregunta breve.
+D) AMBIGUA → confirma en media frase. No guardes hasta aclarar.
 
-Señales fuertes de RESPUESTA:
-- Da el dato pedido de forma directa ("sí", "no", "tres millones", "en Bogotá", "en seis meses").
-- Confirma o corrige un valor ("sí, eso está bien" / "no, es dos millones").
+Señales de PREGUNTA: duda clara ("qué significa", "tengo una duda", "explícame")…
+Señales de RESPUESTA: dato directo (sí/no, número, lugar, plazo), "lo que me recomiendes", o confirmación/corrección.
 
-Nunca trates una pregunta como si fuera la respuesta al campo. Nunca ignores lo que preguntó para "seguir el formulario".
-
-Estilo conversacional:
-- Al empezar: preséntate como Laura, agente de Colsubsidio, di en una frase que estás para ayudar a elegir la mejor opción de vivienda, y luego pasa a la primera pregunta. Puedes basarte en conversation_opening, pero suena espontánea.
-- Reconoce lo que dijo con variedad: "ah ok", "claro", "tiene sentido", "listo", "perfecto", un "mmm" corto, o pasa directo a la siguiente pregunta.
-- Casi nunca digas "gracias". Máximo una o dos veces en toda la conversación, y solo si suena genuino. No lo uses como muletilla tras cada respuesta.
-- En el flujo normal: respuestas cortas (una o dos frases). Cuando aclaras una duda: puedes usar hasta 3–4 frases para que quede claro.
-- Ritmo espontáneo: ocasionalmente una micro-pausa oral ("un segundo…", "a ver…") antes de la siguiente pregunta. No te trabes ni te confundas adrede; suena natural, no actuada.
-- Si la persona duda, ayúdala a aterrizar sin juzgar: explica con ejemplos simples qué le estás preguntando.
-- Si interrumpe, detente y escucha.
-
-Lectura de tono e interés (persistir):
-- Clasifica la predisposición del usuario en: interesado, indeciso, molesto, trolleando, ocupado o desconocido.
-- Cuando detectes un cambio claro de tono (o al menos 1 vez tras 2–3 turnos y otra al cerrar), llama report_user_engagement con label, score 0–100 y reason corta.
-- No digas en voz alta etiquetas como "lead", "troll" o "sentimiento".
-- Si suena interesada o colaboradora: sigue con calidez normal y reporta interesado.
-- Si suena apurada o molesta: baja el ritmo, sé más breve, ofrece cerrar/retomar y reporta molesto u ocupado.
-- Si parece trolling o desinterés claro: reporta trolleando, despídete corto y deja de perfilar.
-
-Reglas obligatorias:
-
-1. Haz únicamente una pregunta principal a la vez y espera la respuesta del usuario.
-2. No conviertas la conversación en un interrogatorio.
-3. En avance de perfil: respuestas cortas. En aclaraciones: prioriza que la persona entienda.
-4. No inventes datos de proyectos, cupos, tasas ni aprobaciones. Sí puedes explicar en lenguaje simple qué significa la pregunta actual (ej. afiliación, ingreso del hogar, obligaciones).
-5. No calcules por tu cuenta puntajes, capacidad crediticia, categorías o proyectos.
-6. El backend de CasaLista es la única fuente de verdad para guardar datos y recomendaciones.
-7. Antes de comenzar, consulta la herramienta get_voice_context.
-8. Utiliza exactamente la intención indicada por el backend (misma que el texto en pantalla); puedes decirla con naturalidad oral.
-9. Usa submit_current_answer SOLO si clasificaste el turno como RESPUESTA (userIntent="answer" y answersCurrentQuestion=true). Si es pregunta/duda/fuera de tema, no llames la tool o usa userIntent acorde y answersCurrentQuestion=false.
-9b. Para campos enum como situacion_crediticia usa valores canónicos: sin_reportes, al_dia, atrasos_menores, atrasos_mayores, en_proceso_normalizacion, desconocida. Para plazo_compra: inmediato, 3_meses, 6_meses, 12_meses, mas_de_un_ano, no_definido.
-10. No afirmes que guardaste información hasta que la herramienta confirme éxito (accepted=true).
-11. Si la herramienta rechaza porque era pregunta/duda: PRIMERO responde al usuario; luego retoma el perfil. Si rechaza por respuesta inválida: aclara y repregunta el mismo campo.
-12. No preguntes información que ya esté confirmada.
-13. Si un dato está precargado, pide confirmación sin revelar cifras sensibles innecesariamente.
-14. Confirma cuidadosamente ingresos, ahorros y obligaciones.
-15. No prometas aprobación de crédito.
-16. No digas que una persona tiene garantizada una vivienda.
-17. No rechaces automáticamente a personas no afiliadas.
-18. Para una persona no afiliada, explica únicamente cuando corresponda que la continuidad depende de la disponibilidad comercial destinada a no afiliados.
-19. No menciones IDs, endpoints, JSON, herramientas ni detalles técnicos.
-20. No reveles que la afiliación proviene de un servicio simulado.
-21. PRIORIDAD: si el usuario pregunta o tiene una duda, respóndele con sustancia antes de seguir el perfil. Contestar bien es más importante que avanzar el formulario en ese turno. Si no sabes, dilo con honestidad y ofrece retomar.
-22. Si el usuario no entiende tu pregunta de perfil, reformúlala con un ejemplo concreto, sin cambiar su intención.
-23. Si la persona interrumpe, detente y escucha.
-24. Cuando el backend indique que el perfil está completo, llama a complete_voice_profile.
-25. Utiliza la frase de cierre entregada por la herramienta, dicha de forma natural, como Laura de Colsubsidio.
-26. Después del cierre, no hagas más preguntas de perfilamiento.
-27. Este resultado es orientativo y no constituye una aprobación de crédito.
-28. Preséntate como Laura (Colsubsidio). No digas que eres "CasaLista" como nombre propio; CasaLista es la plataforma de apoyo.
-29. Si complete_voice_profile falla o tarda: di algo breve como "un segundo, estoy armando tu recomendación" y reintenta la herramienta UNA sola vez. No digas que el servicio está caído, sin conexión o fuera de línea, ni entres en un bucle ofreciendo solo dudas generales.
+Reglas operativas:
+1. Una pregunta principal a la vez.
+2. No interrogatorio ni tono de formulario.
+3. No inventes proyectos, cupos, tasas ni aprobaciones.
+4. No calcules puntajes ni categorías por tu cuenta.
+5. El backend es la única fuente de verdad.
+6. Al inicio: saludo humano + marco 2–3 min + si ahora o más tarde (usa opening_hint si viene). SIN tools primero si ya tienes contexto.
+7. Tras submit_current_answer accepted=true: usa next_question del resultado. NO get_voice_context.
+8. Predisposición: no uses report_user_engagement entre turnos. Al cerrar es OBLIGATORIO: pásala en complete_voice_profile (engagement_label/score/reason).
+9. submit_current_answer SOLO si es RESPUESTA real. Enums: situacion_crediticia (sin_reportes, al_dia, atrasos_menores, atrasos_mayores, en_proceso_normalizacion, desconocida); plazo_compra (inmediato, 3_meses, 6_meses, 12_meses, mas_de_un_ano, no_definido). proyecto_interes opcional: "lo que me recomiendes"/skip → normalizedValue="sin preferencia".
+10. No afirmes que guardaste hasta accepted=true (y ni así lo digas en voz).
+11. Si rechazan por duda: responde corto; luego retoma. Si inválida: repregunta en una frase. Sin menús.
+12. No repitas datos ya confirmados.
+13. Confirma ingresos/ahorros/obligaciones con pregunta corta.
+14. No prometas aprobación de crédito ni vivienda garantizada.
+15. No rechaces automáticamente a no afiliados.
+16. No menciones IDs, JSON, tools ni detalles técnicos.
+17. Si pregunta, contéstale breve antes de seguir el perfil.
+18. Si no entiende, reformúlala más corta con un ejemplo distinto.
+19. Perfil completo → complete_voice_profile CON engagement_label (interesado/indeciso/molesto/trolleando/ocupado/desconocido), score 0–100 y reason breve. Luego LEE SOLO assistant_closing/spoken_summary.
+20. Después del cierre, no más preguntas de perfil.
+21. Preséntate como Laura (Colsubsidio). CasaLista es la plataforma, no tu nombre.
+22. Si complete_voice_profile falla: silencio o "ya casi"; reintenta UNA vez.
 `
 
 export interface CasaListaAgentOptions {
@@ -112,15 +103,25 @@ export interface CasaListaAgentOptions {
   displayName?: string | null
   voice?: string
   onProfileCompleted?: (navigationPath: string) => void
+  /** Prefetched voice context so the first turn skips a tool round-trip. */
+  initialContextSummary?: string | null
 }
 
 export const createCasaListaRealtimeAgent = (options: CasaListaAgentOptions) => {
-  const { leadId, displayName, voice = 'coral', onProfileCompleted } = options
+  const {
+    leadId,
+    displayName,
+    voice = 'coral',
+    onProfileCompleted,
+    initialContextSummary,
+  } = options
 
   const get_voice_context = tool({
     name: 'get_voice_context',
     description:
-      'Obtiene el estado actual del perfil y la única pregunta que debe hacerse a continuación.',
+      'Obtiene el estado actual del perfil y la siguiente pregunta. ' +
+      'Úsala solo al inicio si no trajiste contexto, o si perdiste el hilo. ' +
+      'NO la llames tras cada submit_current_answer si el resultado ya trae next_question.',
     parameters: z.object({}),
     execute: async () => {
       const context = await getVoiceContext(leadId)
@@ -150,73 +151,45 @@ export const createCasaListaRealtimeAgent = (options: CasaListaAgentOptions) => 
     const text = transcript.trim().toLowerCase()
     if (!text) return false
     if (text.includes('?') || text.includes('¿')) return true
-    const questionHints = [
-      'aclara',
-      'aclarar',
-      'explica',
-      'explicar',
+    const doubtPhrases = [
+      'una duda',
+      'tengo una duda',
+      'una pregunta',
+      'tengo una pregunta',
       'qué significa',
       'que significa',
       'no entend',
       'no te entend',
       'puedes repetir',
-      'me puedes',
-      'puedes decirme',
-      'me puedes decir',
+      'puedes explicar',
+      'me puedes explicar',
       'quiero saber',
       'quisiera saber',
-      'por qué',
-      'por que',
-      'cómo es',
-      'como es',
-      'cómo funciona',
-      'como funciona',
-      'cómo hago',
-      'como hago',
-      'cuánto',
-      'cuanto',
-      'cuántos',
-      'cuantos',
-      'dónde',
-      'donde',
-      'cuándo',
-      'cuando puedo',
-      'cuál',
-      'cual ',
-      'cuáles',
-      'cuales',
-      'una duda',
-      'tengo una duda',
-      'una pregunta',
-      'tengo una pregunta',
-      'pregunta',
-      'qué es',
-      'que es',
-      'qué son',
-      'que son',
-      'qué pasa',
-      'que pasa',
-      'no sé qué',
-      'no se que',
       'qué quieres decir',
       'que quieres decir',
-      'otra vez',
-      'repite',
-      'hay forma',
-      'es posible',
-      'se puede',
-      'me recomiendas',
-      'qué diferencia',
-      'que diferencia',
-      'y eso',
-      'oye y',
-      'pero y',
+      'me recomiendas algo',
+      'qué me recomiendas',
+      'que me recomiendas',
+      'hay forma de',
+      'cómo funciona',
+      'como funciona',
+      'qué es eso',
+      'que es eso',
+      'explica un poco',
     ]
-    if (questionHints.some((hint) => text.includes(hint))) return true
-    // Preguntas habladas típicas sin signos: "qué ...", "cómo ...", "cuánto ..."
-    return /^(qué|que|cómo|como|cuánto|cuanto|dónde|donde|cuál|cual|por\s*qué|por\s*que)\b/.test(
-      text,
-    )
+    if (doubtPhrases.some((phrase) => text.includes(phrase))) return true
+    // Solo al inicio; si trae monto/número/sí-no, es respuesta (no duda).
+    if (
+      /^(qué|que|cómo|como|cuánto|cuanto|dónde|donde|cuál|cual|por\s*qué|por\s*que)\b/.test(
+        text,
+      )
+    ) {
+      if (/\d|mill[oó]n|mil\b|pesos|s[ií]\b|\bno\b|aprox|alrededor/.test(text)) {
+        return false
+      }
+      return true
+    }
+    return false
   }
 
   const looksLikeNonAnswer = (transcript: string) => {
@@ -254,10 +227,10 @@ export const createCasaListaRealtimeAgent = (options: CasaListaAgentOptions) => 
   ) => {
     const assistant_guidance =
       kind === 'question'
-        ? `${reason} NO guardes nada. PRIMERO responde con sustancia a lo que el usuario preguntó o dudó (2–5 frases). SOLO después retoma con suavidad la pregunta activa del perfil. No ignores su duda.`
+        ? `${reason} NO guardes nada. Contesta en 1–2 frases cortas y retoma la pregunta activa. Sin muletillas.`
         : kind === 'non_answer'
-          ? `${reason} NO guardes nada. Aclara breve qué dato necesitas y vuelve a hacer la pregunta activa.`
-          : `${reason} NO guardes nada. Explica breve qué necesitas y repregunta el campo activo.`
+          ? `${reason} NO guardes nada. Repregunta el dato en una sola frase corta. Sin menús.`
+          : `${reason} NO guardes nada. Repregunta el campo activo en una frase. Sin menús continuar/editar.`
     return JSON.stringify({
       accepted: false,
       clarification_required: true,
@@ -296,36 +269,59 @@ export const createCasaListaRealtimeAgent = (options: CasaListaAgentOptions) => 
       answersCurrentQuestion,
       userIntent,
     }) => {
-      if (userIntent === 'question' || looksLikeUserQuestion(rawTranscript)) {
+      const deferProject =
+        field === 'proyecto_interes' &&
+        (action === 'skip' ||
+          /lo que me recomiend|sin preferencia|no tengo|ningun|t[uú] decides|como veas|da igual|no s[eé]/i.test(
+            rawTranscript || '',
+          ))
+
+      let effectiveAction = action
+      let effectiveValue = normalizedValue
+      let effectiveIntent = userIntent
+      let effectiveAnswers = answersCurrentQuestion
+
+      if (deferProject) {
+        effectiveAction = 'answer'
+        effectiveValue = 'sin preferencia'
+        effectiveIntent = 'answer'
+        effectiveAnswers = true
+      }
+
+      if (
+        !deferProject &&
+        (effectiveIntent === 'question' || looksLikeUserQuestion(rawTranscript))
+      ) {
         return rejectGuidance(
           'El usuario está preguntando o pidiendo aclaración, no respondiendo el campo.',
           'question',
         )
       }
       if (
-        !answersCurrentQuestion ||
-        userIntent === 'unclear' ||
-        userIntent === 'off_topic' ||
-        userIntent === 'filler'
+        !deferProject &&
+        (!effectiveAnswers ||
+          effectiveIntent === 'unclear' ||
+          effectiveIntent === 'off_topic' ||
+          effectiveIntent === 'filler')
       ) {
         return rejectGuidance(
           'El turno no es una respuesta usable a la pregunta activa.',
-          userIntent === 'filler' || userIntent === 'off_topic'
+          effectiveIntent === 'filler' || effectiveIntent === 'off_topic'
             ? 'non_answer'
             : 'invalid',
         )
       }
-      if (looksLikeNonAnswer(rawTranscript)) {
+      if (!deferProject && looksLikeNonAnswer(rawTranscript)) {
         return rejectGuidance(
           'El audio/transcript no contiene una respuesta usable al campo.',
           'non_answer',
         )
       }
       if (
-        action === 'answer' &&
-        (normalizedValue === null ||
-          normalizedValue === undefined ||
-          (typeof normalizedValue === 'string' && !normalizedValue.trim()))
+        effectiveAction === 'answer' &&
+        (effectiveValue === null ||
+          effectiveValue === undefined ||
+          (typeof effectiveValue === 'string' && !effectiveValue.trim()))
       ) {
         return rejectGuidance(
           'No hay normalizedValue usable para la pregunta activa.',
@@ -336,27 +332,55 @@ export const createCasaListaRealtimeAgent = (options: CasaListaAgentOptions) => 
       const result = await submitVoiceAnswer(leadId, {
         field,
         raw_transcript: rawTranscript,
-        normalized_value: normalizedValue,
-        action,
+        normalized_value: effectiveValue,
+        action: effectiveAction,
       })
+      window.dispatchEvent(
+        new CustomEvent('casalista-lead-updated', { detail: { leadId } }),
+      )
       if (!result.accepted || result.clarification_required) {
         const looksQuestion = looksLikeUserQuestion(rawTranscript)
         return JSON.stringify({
-          ...result,
+          accepted: false,
+          clarification_required: true,
+          field: result.next_question?.field ?? field,
+          next_question: result.next_question
+            ? {
+                field: result.next_question.field,
+                question: result.next_question.question,
+                type: result.next_question.type,
+              }
+            : null,
           user_turn_kind: looksQuestion ? 'question' : 'invalid',
           assistant_guidance: looksQuestion
-            ? `${result.assistant_guidance || 'No se guardó.'} El usuario parece preguntar: respóndele primero y luego retoma el perfil.`
-            : `${result.assistant_guidance || 'La respuesta no fue aceptada.'} Vuelve a preguntar la misma pregunta hasta obtener una respuesta válida. No avances al siguiente campo.`,
+            ? 'Contesta en 1–2 frases y retoma la pregunta activa. Sin esperas ni menús.'
+            : 'Repregunta el mismo campo en una frase corta. Sin "un segundo" ni menús.',
         })
       }
-      return JSON.stringify(result)
+      return JSON.stringify({
+        accepted: true,
+        updated_field: result.updated_field,
+        profile_completed: result.profile_completed,
+        progress: result.progress,
+        next_question: result.next_question
+          ? {
+              field: result.next_question.field,
+              question: result.next_question.question,
+              type: result.next_question.type,
+            }
+          : null,
+        speak_now:
+          result.profile_completed
+            ? 'Llama complete_voice_profile ya. No digas que vas a analizar.'
+            : 'Di SOLO la siguiente pregunta (≤12 palabras). Sin muletillas, eco ni "un segundo".',
+      })
     },
   })
 
   const report_user_engagement = tool({
     name: 'report_user_engagement',
     description:
-      'Registra la predisposición/sentimiento del usuario detectado en la conversación. Úsala cuando el tono cambie o al menos una vez a mitad y al cierre.',
+      'Registra predisposición del usuario. Úsala casi nunca: solo 1 vez al cierre. NUNCA entre turnos (añade latencia).',
     parameters: z.object({
       label: z.enum([
         'interesado',
@@ -370,29 +394,46 @@ export const createCasaListaRealtimeAgent = (options: CasaListaAgentOptions) => 
       reason: z.string().nullable(),
     }),
     execute: async ({ label, score, reason }) => {
-      const result = await reportVoiceEngagement(leadId, {
+      // No bloquear el turno de voz: fire-and-forget.
+      void reportVoiceEngagement(leadId, {
         label,
         score,
         reason,
       })
-      window.dispatchEvent(
-        new CustomEvent('casalista-engagement-updated', { detail: result }),
-      )
-      return JSON.stringify(result)
+        .then((result) => {
+          window.dispatchEvent(
+            new CustomEvent('casalista-engagement-updated', { detail: result }),
+          )
+        })
+        .catch(() => undefined)
+      return JSON.stringify({ ok: true, deferred: true })
     },
   })
 
   const complete_voice_profile = tool({
     name: 'complete_voice_profile',
     description:
-      'Finaliza el perfilamiento cuando el backend ya no tiene preguntas prioritarias y prepara los resultados. Puede tardar hasta un minuto porque genera la recomendación. Antes, si aún no reportaste engagement, llama report_user_engagement.',
-    parameters: z.object({}),
-    execute: async () => {
+      'Finaliza el perfilamiento cuando next_question sea null / profile_completed=true. OBLIGATORIO: incluye engagement_label, score y reason del tono. Puede tardar. Quédate en silencio hasta el resultado; no digas "un segundo".',
+    parameters: z.object({
+      engagement_label: z.enum([
+        'interesado',
+        'indeciso',
+        'molesto',
+        'trolleando',
+        'ocupado',
+        'desconocido',
+      ]),
+      engagement_score: z.number().min(0).max(100).nullable(),
+      engagement_reason: z.string().nullable(),
+    }),
+    execute: async ({ engagement_label, engagement_score, engagement_reason }) => {
       try {
-        const result = await completeVoiceProfile(leadId)
+        const result = await completeVoiceProfile(leadId, {
+          engagement_label,
+          engagement_score,
+          engagement_reason,
+        })
         if (result.completed) {
-          // Diferir: primero el modelo recibe el JSON y puede decir spoken_summary;
-          // luego armamos la navegación para esperar su audio de cierre.
           window.setTimeout(() => {
             onProfileCompleted?.(result.navigation_path)
           }, 80)
@@ -406,10 +447,12 @@ export const createCasaListaRealtimeAgent = (options: CasaListaAgentOptions) => 
           top_project: result.top_project,
           recommended_projects: result.recommended_projects,
           disclaimer: result.disclaimer,
+          engagement_label: result.engagement_label,
+          engagement_score: result.engagement_score,
+          engagement_reason: result.engagement_reason,
           speak_now:
-            'Di EN VOZ ALTA, de forma amigable y completa, el assistant_closing o spoken_summary. ' +
-            'Empieza tipo: "Según la charla que tuve contigo…". Nombra el proyecto, el porqué y el brochure. ' +
-            'No te despidas en seco sin leer la recomendación.',
+            'LEE EN VOZ ALTA SOLO el assistant_closing o spoken_summary. ' +
+            'No inventes menús (continuar/editar/cancelar). No agregues preguntas nuevas.',
         })
       } catch (error) {
         const message =
@@ -422,7 +465,7 @@ export const createCasaListaRealtimeAgent = (options: CasaListaAgentOptions) => 
           retryable: true,
           message,
           assistant_guidance:
-            'Di brevemente que estás preparando la recomendación y vuelve a llamar complete_voice_profile una sola vez. No digas que el servicio está caído ni sin conexión.',
+            'Silencio o "ya casi". Reintenta complete_voice_profile UNA vez. No digas error ni "estoy analizando".',
         })
       }
     },
@@ -434,9 +477,12 @@ export const createCasaListaRealtimeAgent = (options: CasaListaAgentOptions) => 
     instructions: [
       AGENT_INSTRUCTIONS,
       displayName ? `El nombre visible del usuario es ${displayName}.` : '',
-      'Al iniciar, llama get_voice_context antes de saludar.',
-      'En cada turno: clasifica si el usuario responde, pregunta o está ambiguo. Si pregunta, contéstale de verdad antes de seguir el perfil.',
-      'Cuando complete_voice_profile responda con completed=true: LEE EN VOZ ALTA todo assistant_closing o spoken_summary, con tono cálido de Laura. Empieza con "Según la charla que tuve contigo…" si el texto no lo trae. Incluye proyecto, razones y brochure. No saltes a despedida sin decir la recomendación.',
+      initialContextSummary
+        ? `Contexto inicial ya cargado (úsalo al saludar; no llames get_voice_context primero):\n${initialContextSummary}`
+        : 'Al iniciar, si no tienes contexto, llama get_voice_context una vez antes de saludar.',
+      'Corto y sencillo: tras cada respuesta, solo la siguiente pregunta (≤12 palabras). Sin meta-habla ni menús.',
+      'Tras submit_current_answer accepted=true, di solo next_question al instante. Sin tools extras.',
+      'Cuando complete_voice_profile responda completed=true: LEE SOLO assistant_closing/spoken_summary. Sin inventar opciones. Siempre incluye engagement_label al llamar complete.',
     ]
       .filter(Boolean)
       .join('\n'),

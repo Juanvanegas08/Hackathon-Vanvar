@@ -34,6 +34,47 @@ def hash_identifier(
     return digest
 
 
+def seed_identifier_hash(
+    *,
+    document_type: str,
+    document_number: str,
+    country_code: str = "CO",
+) -> str:
+    """Hash used by historical synthetic seed rows (sha256 of TYPE:COUNTRY:number)."""
+    normalized = normalize_document_number(document_number)
+    payload = (
+        f"{(document_type or '').strip().upper()}:"
+        f"{(country_code or 'CO').strip().upper()}:"
+        f"{normalized}"
+    )
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def candidate_identifier_hashes(
+    *,
+    document_type: str,
+    document_number: str,
+    country_code: str = "CO",
+    pepper: str = "",
+) -> list[str]:
+    """Return lookup hashes for both app HMAC and historical seed formats."""
+    hashes = [
+        hash_identifier(
+            document_type=document_type,
+            document_number=document_number,
+            country_code=country_code,
+            pepper=pepper,
+        ),
+        seed_identifier_hash(
+            document_type=document_type,
+            document_number=document_number,
+            country_code=country_code,
+        ),
+    ]
+    # Preserve order while dropping duplicates.
+    return list(dict.fromkeys(hashes))
+
+
 def mask_document_last_four(document_number: str) -> str | None:
     normalized = normalize_document_number(document_number)
     if not normalized:

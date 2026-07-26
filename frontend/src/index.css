@@ -12,8 +12,8 @@
   --color-green: #3d8b6e;
   --color-surface: #ffffff;
   --color-line: #e8e6df;
-  --font-sans: 'Outfit', ui-sans-serif, system-ui, sans-serif;
-  --font-display: 'Fraunces', Georgia, serif;
+  --font-sans: 'Poppins', ui-sans-serif, system-ui, sans-serif;
+  --font-display: 'Poppins', ui-sans-serif, system-ui, sans-serif;
   color: var(--color-ink);
   background: var(--color-bg);
   font-family: var(--font-sans);
@@ -38,6 +38,8 @@ body {
   margin: 0;
   min-width: 320px;
   background: var(--color-bg);
+  font-weight: 400;
+  letter-spacing: 0.01em;
 }
 
 /* Scroll más tenue y redondeado */
@@ -85,6 +87,8 @@ textarea {
 
 .font-display {
   font-family: var(--font-display);
+  font-weight: 600;
+  letter-spacing: -0.02em;
 }
 
 .surface-shadow {
@@ -105,19 +109,19 @@ textarea {
   --bubble-blending: hard-light;
 }
 
-/* Movimiento vivo, pero contenido en la zona del hero */
+/* Movimiento fuerte tipo lava / bubbles */
 @keyframes moveInCircle {
   0% {
     transform: rotate(0deg) translate(0, 0) scale(1);
   }
   25% {
-    transform: rotate(90deg) translate(14%, -10%) scale(1.08);
+    transform: rotate(90deg) translate(32%, -24%) scale(1.28);
   }
   50% {
-    transform: rotate(180deg) translate(-4%, 16%) scale(0.96);
+    transform: rotate(180deg) translate(-18%, 36%) scale(0.82);
   }
   75% {
-    transform: rotate(270deg) translate(-12%, 6%) scale(1.06);
+    transform: rotate(270deg) translate(-30%, 14%) scale(1.22);
   }
   100% {
     transform: rotate(360deg) translate(0, 0) scale(1);
@@ -125,51 +129,80 @@ textarea {
 }
 
 @keyframes moveVertical {
-  0%,
+  0% {
+    transform: translateY(-42%) translateX(-10%) scale(0.9);
+  }
+  50% {
+    transform: translateY(42%) translateX(16%) scale(1.25);
+  }
   100% {
-    transform: translateY(-22%) translateX(0) scale(1);
-  }
-  33% {
-    transform: translateY(8%) translateX(8%) scale(1.1);
-  }
-  66% {
-    transform: translateY(24%) translateX(-6%) scale(0.94);
+    transform: translateY(-42%) translateX(-10%) scale(0.9);
   }
 }
 
 @keyframes moveHorizontal {
-  0%,
-  100% {
-    transform: translateX(-18%) translateY(-8%) scale(1);
+  0% {
+    transform: translateX(-40%) translateY(-16%) scale(1);
   }
   50% {
-    transform: translateX(18%) translateY(10%) scale(1.08);
+    transform: translateX(40%) translateY(18%) scale(1.2);
+  }
+  100% {
+    transform: translateX(-40%) translateY(-16%) scale(1);
   }
 }
 
 @keyframes moveSoft {
-  0%,
+  0% {
+    transform: translate(-8%, 6%) scale(0.88);
+  }
+  33% {
+    transform: translate(24%, -28%) scale(1.3);
+  }
+  66% {
+    transform: translate(-22%, 22%) scale(0.85);
+  }
   100% {
-    transform: translate(0, 0) scale(1);
-  }
-  35% {
-    transform: translate(10%, -12%) scale(1.12);
-  }
-  70% {
-    transform: translate(-8%, 10%) scale(0.92);
+    transform: translate(-8%, 6%) scale(0.88);
   }
 }
 
 @keyframes moveDrift {
-  0%,
-  100% {
-    transform: translate(0, 0) scale(1.05);
+  0% {
+    transform: translate(10%, -8%) scale(1.1);
   }
   40% {
-    transform: translate(-14%, 12%) scale(1.14);
+    transform: translate(-34%, 28%) scale(1.32);
   }
   75% {
-    transform: translate(12%, -8%) scale(0.96);
+    transform: translate(28%, -22%) scale(0.86);
+  }
+  100% {
+    transform: translate(10%, -8%) scale(1.1);
+  }
+}
+
+@keyframes pulseGlow {
+  0%,
+  100% {
+    opacity: 0.7;
+    transform: scale(1) translate(0, 0);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1.15) translate(-4%, 3%);
+  }
+}
+
+@keyframes swirlField {
+  0% {
+    transform: rotate(0deg) scale(1);
+  }
+  50% {
+    transform: rotate(8deg) scale(1.06);
+  }
+  100% {
+    transform: rotate(0deg) scale(1);
   }
 }
 
@@ -177,23 +210,32 @@ textarea {
   position: absolute;
   inset: 0;
   overflow: hidden;
-  background: linear-gradient(40deg, var(--bubble-bg1), var(--bubble-bg2));
+  background: linear-gradient(40deg, #fff6c8, #fffbeb 40%, #faf9f6);
 }
 
-/* Amarillo base siempre presente (evita huecos blancos) */
+/* Amarillo base a lo ancho del hero */
 .bubble-base-glow {
   position: absolute;
-  top: 0;
-  right: -8%;
-  bottom: 0;
-  left: 8%;
+  inset: -8%;
   background:
-    radial-gradient(ellipse at 60% 35%, rgba(245, 197, 24, 0.48) 0%, transparent 58%),
-    radial-gradient(ellipse at 80% 55%, rgba(255, 229, 106, 0.42) 0%, transparent 55%),
-    radial-gradient(ellipse at 35% 60%, rgba(255, 236, 140, 0.34) 0%, transparent 52%),
-    radial-gradient(ellipse at 50% 80%, rgba(245, 197, 24, 0.22) 0%, transparent 50%);
+    radial-gradient(ellipse at 20% 40%, rgba(245, 197, 24, 0.5) 0%, transparent 55%),
+    radial-gradient(ellipse at 50% 30%, rgba(255, 229, 106, 0.52) 0%, transparent 58%),
+    radial-gradient(ellipse at 80% 50%, rgba(245, 197, 24, 0.5) 0%, transparent 55%),
+    radial-gradient(ellipse at 35% 75%, rgba(255, 236, 140, 0.42) 0%, transparent 52%),
+    radial-gradient(ellipse at 70% 80%, rgba(255, 220, 70, 0.35) 0%, transparent 50%);
   filter: blur(8px);
-  animation: moveSoft 20s ease-in-out infinite alternate;
+  animation: pulseGlow 5s ease-in-out infinite;
+  transform-origin: 50% 45%;
+}
+
+.bubble-base-glow-b {
+  inset: -10%;
+  opacity: 0.9;
+  animation: moveDrift 6s ease-in-out infinite reverse;
+  background:
+    radial-gradient(ellipse at 15% 55%, rgba(255, 220, 70, 0.45) 0%, transparent 52%),
+    radial-gradient(ellipse at 55% 45%, rgba(245, 197, 24, 0.4) 0%, transparent 50%),
+    radial-gradient(ellipse at 88% 35%, rgba(255, 229, 106, 0.42) 0%, transparent 52%);
 }
 
 .gradient-bg-svg {
@@ -204,30 +246,20 @@ textarea {
 
 .gradients-container {
   position: absolute;
-  top: 0;
-  right: 0;
-  width: 88%;
-  height: 100%;
+  inset: -8%;
+  width: auto;
+  height: auto;
+  animation: swirlField 12s ease-in-out infinite;
+  will-change: transform;
 }
 
 @media (max-width: 768px) {
-  .gradients-container {
-    width: 100%;
-    left: 0;
-    right: 0;
-  }
-
-  .bubble-base-glow {
-    left: -10%;
-    right: -10%;
-  }
-
   .gradient-bg-veil {
     background: linear-gradient(
       180deg,
-      rgba(250, 249, 246, 0.55) 0%,
-      rgba(250, 249, 246, 0.2) 45%,
-      rgba(250, 249, 246, 0.55) 100%
+      rgba(250, 249, 246, 0.28) 0%,
+      rgba(250, 249, 246, 0.1) 50%,
+      rgba(250, 249, 246, 0.35) 100%
     ) !important;
   }
 }
@@ -237,21 +269,168 @@ textarea {
 .gradients-container .g3,
 .gradients-container .g4,
 .gradients-container .g5,
-.gradients-container .g6 {
+.gradients-container .g6,
+.gradients-container .g7,
+.gradients-container .g8,
+.gradients-container .interactive {
   position: absolute;
   mix-blend-mode: var(--bubble-blending);
   background-repeat: no-repeat;
+  will-change: transform;
 }
 
 .hero-bubbles {
-  mask-image:
-    linear-gradient(to right, transparent 0%, #000 10%, #000 92%, transparent 100%),
-    linear-gradient(to bottom, transparent 0%, #000 12%, #000 72%, transparent 100%);
-  mask-composite: intersect;
-  -webkit-mask-image:
-    linear-gradient(to right, transparent 0%, #000 10%, #000 92%, transparent 100%),
-    linear-gradient(to bottom, transparent 0%, #000 12%, #000 72%, transparent 100%);
-  -webkit-mask-composite: source-in;
+  /* Solo difumina arriba/abajo del hero; el amarillo ocupa todo el ancho */
+  mask-image: linear-gradient(to bottom, transparent 0%, #000 10%, #000 78%, transparent 100%);
+  -webkit-mask-image: linear-gradient(
+    to bottom,
+    transparent 0%,
+    #000 10%,
+    #000 78%,
+    transparent 100%
+  );
+}
+
+/* Forma orgánica anterior + estilo suave actual */
+.hero-photo {
+  animation: hero-photo-float 9s ease-in-out infinite;
+}
+
+.hero-photo-glow {
+  position: absolute;
+  inset: 6% 2% 2% 6%;
+  border-radius: 48% 52% 45% 55%;
+  background:
+    radial-gradient(circle at 45% 40%, rgba(245, 197, 24, 0.55) 0%, transparent 62%),
+    radial-gradient(circle at 70% 65%, rgba(255, 229, 106, 0.32) 0%, transparent 55%);
+  filter: blur(30px);
+  z-index: 0;
+  animation: hero-glow-pulse 8s ease-in-out infinite;
+}
+
+.hero-photo-frame {
+  position: relative;
+  z-index: 1;
+  overflow: hidden;
+  /* Forma más irregular / menos óvalo perfecto */
+  border-radius: 58% 42% 63% 37% / 38% 62% 40% 60%;
+  transform: rotate(-2deg);
+  box-shadow:
+    0 0 0 8px rgba(255, 255, 255, 0.28),
+    0 0 0 16px rgba(245, 197, 24, 0.14),
+    0 22px 48px rgba(18, 20, 26, 0.1);
+  animation: hero-shape-morph 11s ease-in-out infinite;
+}
+
+.hero-photo-img {
+  display: block;
+  width: 100%;
+  aspect-ratio: 5 / 4;
+  object-fit: cover;
+  object-position: center 28%;
+  transform: scale(1.08);
+  /* Suaviza bordes sin forzar óvalo redondo */
+  mask-image: radial-gradient(
+    72% 78% at 48% 46%,
+    #000 48%,
+    rgba(0, 0, 0, 0.9) 66%,
+    transparent 88%
+  );
+  -webkit-mask-image: radial-gradient(
+    72% 78% at 48% 46%,
+    #000 48%,
+    rgba(0, 0, 0, 0.9) 66%,
+    transparent 88%
+  );
+}
+
+@keyframes hero-photo-float {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-6px);
+  }
+}
+
+@keyframes hero-glow-pulse {
+  0%,
+  100% {
+    opacity: 0.72;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1.05);
+  }
+}
+
+@keyframes hero-shape-morph {
+  0%,
+  100% {
+    border-radius: 58% 42% 63% 37% / 38% 62% 40% 60%;
+    transform: rotate(-2deg);
+  }
+  33% {
+    border-radius: 40% 60% 35% 65% / 55% 35% 65% 45%;
+    transform: rotate(1.2deg);
+  }
+  66% {
+    border-radius: 62% 38% 48% 52% / 45% 58% 42% 55%;
+    transform: rotate(-1deg);
+  }
+}
+
+/* Tablet / móvil: forma suave, ancha y estable (sin óvalo elongado) */
+@media (max-width: 1023px) {
+  .hero-photo-frame {
+    border-radius: 2rem 2.4rem 2.2rem 1.8rem;
+    transform: none;
+    animation: none;
+    box-shadow:
+      0 0 0 5px rgba(255, 255, 255, 0.34),
+      0 0 0 10px rgba(245, 197, 24, 0.14),
+      0 14px 32px rgba(18, 20, 26, 0.1);
+  }
+
+  .hero-photo-img {
+    aspect-ratio: 5 / 4;
+    object-position: center 30%;
+    transform: scale(1.02);
+    mask-image: none;
+    -webkit-mask-image: none;
+  }
+
+  .hero-photo-glow {
+    inset: 8% 4% 4% 8%;
+    border-radius: 2.4rem;
+    filter: blur(24px);
+  }
+}
+
+@media (max-width: 640px) {
+  .hero-photo-frame {
+    border-radius: 1.6rem 1.9rem 1.75rem 1.5rem;
+  }
+
+  .hero-photo-img {
+    aspect-ratio: 4 / 3;
+    object-position: center 28%;
+  }
+
+  .hero-photo-glow {
+    inset: 12% 8% 8% 12%;
+    filter: blur(18px);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .hero-photo,
+  .hero-photo-glow,
+  .hero-photo-frame {
+    animation: none !important;
+  }
 }
 
 .gradients-container .g1 {
@@ -260,99 +439,142 @@ textarea {
     rgba(var(--bubble-1), 0.95) 0,
     rgba(var(--bubble-1), 0) 50%
   );
-  width: 70%;
+  width: 55%;
   height: 70%;
-  top: 8%;
-  left: 18%;
+  top: 0%;
+  left: -5%;
   transform-origin: center center;
-  animation: moveVertical 12s ease-in-out infinite;
+  animation: moveVertical 4.5s ease-in-out infinite;
   opacity: 1;
 }
 
 .gradients-container .g2 {
   background: radial-gradient(
     circle at center,
-    rgba(var(--bubble-2), 0.9) 0,
+    rgba(var(--bubble-2), 0.95) 0,
     rgba(var(--bubble-2), 0) 50%
   );
-  width: 65%;
-  height: 65%;
-  top: 22%;
-  left: 35%;
-  transform-origin: 40% 50%;
-  animation: moveInCircle 16s ease-in-out infinite reverse;
+  width: 55%;
+  height: 70%;
+  top: 10%;
+  left: 25%;
+  transform-origin: 35% 45%;
+  animation: moveInCircle 5.5s linear infinite reverse;
   opacity: 1;
 }
 
 .gradients-container .g3 {
   background: radial-gradient(
     circle at center,
-    rgba(var(--bubble-3), 0.92) 0,
+    rgba(var(--bubble-3), 0.95) 0,
     rgba(var(--bubble-3), 0) 50%
   );
-  width: 60%;
-  height: 60%;
-  top: 38%;
-  left: 8%;
-  transform-origin: 60% 40%;
-  animation: moveInCircle 18s ease-in-out infinite;
+  width: 55%;
+  height: 70%;
+  top: 5%;
+  left: 55%;
+  transform-origin: 65% 35%;
+  animation: moveInCircle 6s linear infinite;
   opacity: 1;
 }
 
 .gradients-container .g4 {
   background: radial-gradient(
     circle at center,
-    rgba(var(--bubble-4), 0.85) 0,
+    rgba(var(--bubble-4), 0.9) 0,
     rgba(var(--bubble-4), 0) 50%
   );
-  width: 58%;
-  height: 58%;
-  top: 12%;
-  left: 42%;
+  width: 50%;
+  height: 60%;
+  top: 25%;
+  left: 5%;
   transform-origin: center;
-  animation: moveHorizontal 14s ease-in-out infinite;
-  opacity: 0.9;
+  animation: moveHorizontal 4.8s ease-in-out infinite;
+  opacity: 0.95;
 }
 
 .gradients-container .g5 {
   background: radial-gradient(
     circle at center,
-    rgba(var(--bubble-5), 0.95) 0,
+    rgba(var(--bubble-5), 0.98) 0,
     rgba(var(--bubble-5), 0) 50%
   );
-  width: 75%;
+  width: 60%;
   height: 75%;
-  top: 28%;
-  left: 20%;
+  top: 15%;
+  left: 35%;
   transform-origin: 30% 60%;
-  animation: moveSoft 13s ease-in-out infinite;
+  animation: moveSoft 5s ease-in-out infinite;
   opacity: 1;
 }
 
 .gradients-container .g6 {
   background: radial-gradient(
     circle at center,
-    rgba(var(--bubble-2), 0.8) 0,
+    rgba(var(--bubble-2), 0.88) 0,
     rgba(var(--bubble-2), 0) 50%
+  );
+  width: 50%;
+  height: 65%;
+  top: 30%;
+  left: 60%;
+  transform-origin: center;
+  animation: moveDrift 5.2s ease-in-out infinite;
+  opacity: 1;
+}
+
+.gradients-container .g7 {
+  background: radial-gradient(
+    circle at center,
+    rgba(var(--bubble-1), 0.9) 0,
+    rgba(var(--bubble-1), 0) 50%
+  );
+  width: 48%;
+  height: 60%;
+  top: 40%;
+  left: -2%;
+  transform-origin: 70% 30%;
+  animation: moveInCircle 4.2s ease-in-out infinite reverse;
+  opacity: 0.95;
+}
+
+.gradients-container .g8 {
+  background: radial-gradient(
+    circle at center,
+    rgba(var(--bubble-3), 0.9) 0,
+    rgba(var(--bubble-3), 0) 50%
+  );
+  width: 50%;
+  height: 60%;
+  top: -5%;
+  left: 70%;
+  transform-origin: 20% 70%;
+  animation: moveVertical 5.8s ease-in-out infinite reverse;
+  opacity: 0.9;
+}
+
+.gradients-container .interactive {
+  background: radial-gradient(
+    circle at center,
+    rgba(var(--bubble-interactive), 0.85) 0,
+    rgba(var(--bubble-interactive), 0) 50%
   );
   width: 55%;
   height: 55%;
-  top: 45%;
-  left: 40%;
-  transform-origin: center;
-  animation: moveDrift 15s ease-in-out infinite;
-  opacity: 0.95;
+  top: 0;
+  left: 0;
+  opacity: 0.85;
 }
 
 .gradient-bg-veil {
   position: absolute;
   inset: 0;
+  /* Solo un velo suave para leer el texto; el amarillo se ve en toda la zona */
   background: linear-gradient(
-    100deg,
-    rgba(250, 249, 246, 0.88) 0%,
-    rgba(250, 249, 246, 0.5) 28%,
-    rgba(250, 249, 246, 0.12) 50%,
-    transparent 68%
+    180deg,
+    rgba(250, 249, 246, 0.22) 0%,
+    rgba(250, 249, 246, 0.08) 45%,
+    rgba(250, 249, 246, 0.2) 100%
   );
 }
 
@@ -371,7 +593,12 @@ textarea {
   .gradients-container .g3,
   .gradients-container .g4,
   .gradients-container .g5,
-  .gradients-container .g6 {
+  .gradients-container .g6,
+  .gradients-container .g7,
+  .gradients-container .g8,
+  .gradients-container,
+  .bubble-base-glow,
+  .bubble-base-glow-b {
     animation: none !important;
   }
 }

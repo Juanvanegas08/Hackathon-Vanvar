@@ -1,10 +1,14 @@
 import { describe, expect, it } from 'vitest'
 import type { AdvisorSummaryResponse, LeadResponse } from '@/api/types'
 import {
+  affinityBandLabel,
   buildBuyerPersona,
   buildCallInsights,
   buildClosingPlaybook,
   fieldLabel,
+  getAffinityBand,
+  resolveBuyerPersonSlide,
+  resolveLeadAffinity,
 } from '@/utils/advisorBriefing'
 
 const leadBase: LeadResponse = {
@@ -56,6 +60,18 @@ describe('advisorBriefing', () => {
     expect(fieldLabel('salario_mensual')).toBe('Salario laboral')
   })
 
+  it('classifies affinity bands by housing compatibility', () => {
+    expect(getAffinityBand(82)).toBe('listo')
+    expect(getAffinityBand(55)).toBe('por_evaluar')
+    expect(getAffinityBand(25)).toBe('baja_afinidad')
+    expect(affinityBandLabel('por_evaluar')).toBe('Por evaluar')
+  })
+
+  it('resolves buyer person pptx slides by project name', () => {
+    expect(resolveBuyerPersonSlide('Monguí')).toBe(4)
+    expect(resolveBuyerPersonSlide('La Macarena')).toBe(3)
+  })
+
   it('builds an affiliate buyer persona with high urgency', () => {
     const persona = buildBuyerPersona(leadBase, summaryBase)
     expect(persona.title).toMatch(/Familia afiliada|Afiliado categoría A/i)
@@ -63,10 +79,61 @@ describe('advisorBriefing', () => {
     expect(persona.talkTracks.length).toBeGreaterThan(0)
   })
 
+  it('builds historical buyer persona from top project profile', () => {
+    const persona = buildBuyerPersona(leadBase, summaryBase, {
+      project_id: 'mongui',
+      project_name: 'Monguí',
+      canonical_project_id: 'mongui',
+      rank: 1,
+      compatibility_score: 91,
+      confidence: 'high',
+      historical_profile_available: true,
+      historical_profile: {
+        total_buyers: 100,
+        affiliated_percentage: 66,
+        non_affiliated_percentage: 34,
+        salary_range_distribution: { 'Hasta 2 smlv': 87 },
+        segments: { Medio: 39 },
+        age_range_distribution: { '20 a 35 años': 56 },
+      },
+    })
+    expect(persona.title).toBe('Buyer persona · Monguí')
+    expect(persona.historicalAvailable).toBe(true)
+    expect(persona.pptxSlide).toBe(4)
+    expect(persona.pptxHref).toBe('/docs/Buyer-Person.pptx')
+    expect(persona.profileBullets.some((item) => item.includes('66%'))).toBe(true)
+  })
+
   it('surfaces call insights and closing steps', () => {
-    const insights = buildCallInsights(leadBase, summaryBase)
+    const insights = buildCallInsights(
+      {
+        ...leadBase,
+        engagement_label: 'interesado',
+        engagement_score: 90,
+        engagement_reason: 'Muy colaborador',
+      },
+      summaryBase,
+      {
+        project_id: 'p1',
+        project_name: 'Monguí',
+        canonical_project_id: 'mongui',
+        rank: 1,
+        compatibility_score: 88,
+        confidence: 'high',
+      },
+    )
     expect(insights.some((item) => item.label === 'Identidad')).toBe(true)
     expect(insights.some((item) => item.label === 'Interés declarado')).toBe(true)
+    expect(insights.some((item) => item.label === 'Predisposición (Laura)')).toBe(true)
+    expect(insights.some((item) => item.label === 'Afinidad vivienda')).toBe(true)
+    expect(resolveLeadAffinity(leadBase, {
+      project_id: 'p1',
+      project_name: 'Monguí',
+      canonical_project_id: 'mongui',
+      rank: 1,
+      compatibility_score: 88,
+      confidence: 'high',
+    }).band).toBe('listo')
 
     const steps = buildClosingPlaybook(leadBase, summaryBase, {
       project_id: 'p1',

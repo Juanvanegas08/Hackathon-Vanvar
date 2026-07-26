@@ -141,6 +141,36 @@ class Settings(BaseSettings):
         default=True,
         alias="TWILIO_VALIDATE_SIGNATURE",
     )
+    twilio_voice_mode: Literal["gather", "conversation_relay"] = Field(
+        # ConversationRelay + Realtime text is required for web-parity phone Laura.
+        default="conversation_relay",
+        alias="TWILIO_VOICE_MODE",
+    )
+    twilio_tts_provider: str = Field(
+        default="ElevenLabs",
+        alias="TWILIO_TTS_PROVIDER",
+    )
+    twilio_tts_voice: str = Field(
+        # ElevenLabs voice id (phone-only difference vs web Realtime "coral").
+        default="",
+        alias="TWILIO_TTS_VOICE",
+    )
+    twilio_transcription_provider: str = Field(
+        # Deepgram is typically faster EOU detection on phone than Google.
+        default="Deepgram",
+        alias="TWILIO_TRANSCRIPTION_PROVIDER",
+    )
+    twilio_speech_model: str = Field(
+        default="nova-2-general",
+        alias="TWILIO_SPEECH_MODEL",
+    )
+    twilio_speech_timeout_ms: int = Field(
+        # Lower = snappier turn-taking (Twilio allows 600–5000).
+        default=600,
+        alias="TWILIO_SPEECH_TIMEOUT_MS",
+        ge=600,
+        le=5000,
+    )
     scheduled_call_poll_seconds: int = Field(
         default=30,
         alias="SCHEDULED_CALL_POLL_SECONDS",

@@ -73,13 +73,12 @@ Reglas:
 - Prioriza proyectos con brochure_url cuando existan.
 - La reason debe explicar por qué encaja con ESTE perfil (hogar/tamaño, ingresos, ubicación deseada, afiliación, plazo).
 - Si la persona no afiliada, no la excluyas; menciona que la continuidad comercial depende de disponibilidad.
-- spoken_summary DEBE sonar a Laura hablando en voz alta (3 a 6 frases), cálida y clara. Estructura obligatoria:
-  1) Apertura: "Según la charla que tuve contigo, y después de revisar los proyectos del catálogo, mi recomendación es…"
-  2) Nombrar el proyecto #1 y por qué encaja (hogar vs tipología/m², ubicación, precio/VIS si aplica).
-  3) Mencionar el brochure en voz natural ("puedes revisar el brochure en este enlace: …") si hay brochure_url.
-  4) Nombrar 1–2 alternativas cortas.
-  5) Cerrar con que es orientativo, no una aprobación de crédito.
-- No uses jerga técnica ni digas "spoken_summary", "JSON" o "motor".
+- spoken_summary DEBE sonar a Laura hablando en voz alta (2 a 4 frases cortas), cálida y clara. Estructura:
+  1) Apertura breve: "Según la charla que tuve contigo…"
+  2) Nombrar el proyecto #1 y por qué encaja (1 frase).
+  3) Si hay brochure_url: "puedes revisar el brochure en este enlace: …"
+  4) Una alternativa corta si aplica + cierre orientativo (no es aprobación de crédito).
+- No ofrezcas menús (continuar/editar/cancelar). No uses jerga técnica ni digas "spoken_summary", "JSON" o "motor".
 """.strip()
 
 

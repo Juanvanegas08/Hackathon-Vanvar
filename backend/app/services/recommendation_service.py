@@ -71,6 +71,7 @@ class RecommendationService:
         min_score: float | None = None,
         persist_profile: bool = True,
         brochure_only: bool = True,
+        prefer_openai: bool | None = None,
     ) -> RecommendationResult:
         """Build ranked recommendations for a lead profile."""
         generated_at = datetime.now(UTC)
@@ -143,10 +144,12 @@ class RecommendationService:
             if with_brochure:
                 projects = with_brochure
 
-        if (
+        use_openai = (
             self._settings.prefer_openai_recommendations
-            and self._openai.enabled
-        ):
+            if prefer_openai is None
+            else prefer_openai
+        )
+        if use_openai and self._openai.enabled:
             try:
                 return self._recommend_with_openai(
                     lead=lead,
@@ -263,6 +266,11 @@ class RecommendationService:
                     departamento=project.departamento,
                     etapa=project.etapa,
                     historical_profile_available=project.perfil_historico.total_buyers > 0,
+                    historical_profile=(
+                        project.perfil_historico
+                        if project.perfil_historico.total_buyers > 0
+                        else None
+                    ),
                     aliases=aliases,
                     metadata={
                         "original_names": aliases,
@@ -593,6 +601,11 @@ class RecommendationService:
             departamento=project.departamento,
             etapa=project.etapa,
             historical_profile_available=project.perfil_historico.total_buyers > 0,
+            historical_profile=(
+                project.perfil_historico
+                if project.perfil_historico.total_buyers > 0
+                else None
+            ),
             aliases=aliases,
             metadata={
                 "original_names": aliases,

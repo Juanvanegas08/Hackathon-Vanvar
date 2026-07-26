@@ -18,6 +18,8 @@ from app.models.lead import (
     LeadStatus,
     PurchaseTimeline,
 )
+from app.utils.commercial_affinity import AffinityBand
+from app.utils.email import sanitize_optional_email
 
 
 class LeadCreate(BaseModel):
@@ -172,6 +174,16 @@ class LeadResponse(BaseModel):
     engagement_score: int | None = None
     engagement_reason: str | None = None
     engagement_updated_at: datetime | None = None
+    affinity_percent: float | None = None
+    affinity_band: AffinityBand | None = None
+    top_project_id: str | None = None
+    top_project_name: str | None = None
+
+    @field_validator("correo", mode="before")
+    @classmethod
+    def coerce_correo(cls, value: object) -> str | None:
+        """Tolerate seeded demo emails that EmailStr would otherwise reject."""
+        return sanitize_optional_email(value)
 
     @classmethod
     def from_lead(cls, lead: Lead) -> "LeadResponse":

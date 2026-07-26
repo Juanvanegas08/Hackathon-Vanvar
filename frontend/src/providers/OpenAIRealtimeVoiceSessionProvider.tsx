@@ -22,6 +22,29 @@ import type {
 } from '@/providers/voiceTypes'
 import { getErrorMessage } from '@/utils/errors'
 
+/** server_vad estricto (ruido) + menos eagerness (silence más largo). */
+const BASE_TURN_DETECTION = {
+  type: 'server_vad' as const,
+  threshold: 0.72,
+  prefixPaddingMs: 300,
+  silenceDurationMs: 650,
+  createResponse: true,
+}
+
+/** Tras el saludo: permite barge-in real del usuario. */
+const ACTIVE_TURN_DETECTION = {
+  ...BASE_TURN_DETECTION,
+  interruptResponse: true,
+}
+
+/** Durante el intro: el ruido no debe cortar a Laura. */
+const INTRO_TURN_DETECTION = {
+  ...BASE_TURN_DETECTION,
+  interruptResponse: false,
+}
+
+const INTRO_GUARD_MAX_MS = 10_000
+
 const extractText = (item: unknown): string => {
   if (!item || typeof item !== 'object') return ''
   const record = item as Record<string, unknown>
@@ -63,12 +86,60 @@ export const OpenAIRealtimeVoiceSessionProvider = ({ children }: PropsWithChildr
   const closingSpeechStartedRef = useRef(false)
   const onNavigateRef = useRef<((path: string) => void) | null>(null)
   const submitHandlerRef = useRef<((text: string) => Promise<void>) | null>(null)
+  const introGuardActiveRef = useRef(false)
+  const introSpeechSeenRef = useRef(false)
+  const introGuardTimerRef = useRef<number | null>(null)
+  const userMutedRef = useRef(false)
+
+  const setMicEnabled = useCallback((enabled: boolean) => {
+    mediaStreamRef.current?.getAudioTracks().forEach((track) => {
+      track.enabled = enabled
+    })
+    try {
+      sessionRef.current?.mute(!enabled)
+    } catch {
+      // ignore if transport already closed
+    }
+  }, [])
+
+  const endIntroGuard = useCallback(() => {
+    if (!introGuardActiveRef.current) return
+    introGuardActiveRef.current = false
+    introSpeechSeenRef.current = false
+    if (introGuardTimerRef.current) {
+      window.clearTimeout(introGuardTimerRef.current)
+      introGuardTimerRef.current = null
+    }
+    // Reactiva barge-in tras el saludo.
+    try {
+      void sessionRef.current?.transport.updateSessionConfig({
+        audio: {
+          input: {
+            noiseReduction: { type: 'near_field' },
+            turnDetection: ACTIVE_TURN_DETECTION,
+          },
+        },
+      })
+    } catch {
+      // ignore config race on teardown
+    }
+    if (!userMutedRef.current) {
+      setMicEnabled(true)
+    }
+  }, [setMicEnabled])
 
   const cleanup = useCallback(async () => {
     if (completionTimerRef.current) {
       window.clearTimeout(completionTimerRef.current)
       completionTimerRef.current = null
     }
+    if (introGuardTimerRef.current) {
+      window.clearTimeout(introGuardTimerRef.current)
+      introGuardTimerRef.current = null
+    }
+    introGuardActiveRef.current = false
+    introSpeechSeenRef.current = false
+    userMutedRef.current = false
     try {
       sessionRef.current?.close()
     } catch {
@@ -147,6 +218,21 @@ export const OpenAIRealtimeVoiceSessionProvider = ({ children }: PropsWithChildr
       clientSecretRef.current = secretResponse.client_secret
 
       const context = await getVoiceContext(leadId)
+      const nextQ = context.next_question
+      const initialContextSummary = [
+        `display_name=${context.display_name ?? ''}`,
+        `progress=${context.progress}`,
+        `profile_completed=${context.profile_completed}`,
+        nextQ
+          ? `next_question.field=${nextQ.field}; next_question.intent=${nextQ.question}`
+          : 'next_question=null',
+        context.conversation_opening
+          ? `opening_hint=${context.conversation_opening}`
+          : '',
+      ]
+        .filter(Boolean)
+        .join('\n')
+
       const mediaStream = await navigator.mediaDevices.getUserMedia({
         audio: {
           echoCancellation: true,
@@ -169,6 +255,7 @@ export const OpenAIRealtimeVoiceSessionProvider = ({ children }: PropsWithChildr
         leadId,
         displayName: context.display_name,
         voice: secretResponse.voice,
+        initialContextSummary,
         onProfileCompleted: (path) => {
           scheduleNavigation(path)
         },
@@ -177,17 +264,32 @@ export const OpenAIRealtimeVoiceSessionProvider = ({ children }: PropsWithChildr
       const session = new RealtimeSession(agent, {
         transport,
         model: secretResponse.model,
+        config: {
+          parallelToolCalls: false,
+          audio: {
+            input: {
+              noiseReduction: { type: 'near_field' },
+              turnDetection: INTRO_TURN_DETECTION,
+            },
+          },
+        },
       })
       sessionRef.current = session
 
       session.on('audio_start', () => {
         setVoiceState('speaking')
+        if (introGuardActiveRef.current) {
+          introSpeechSeenRef.current = true
+        }
         // Solo contamos el speech DE CIERRE (después de armar la navegación).
         if (completionPathRef.current) {
           closingSpeechStartedRef.current = true
         }
       })
       session.on('audio_stopped', () => {
+        if (introGuardActiveRef.current && introSpeechSeenRef.current) {
+          endIntroGuard()
+        }
         if (completionPathRef.current && closingSpeechStartedRef.current) {
           if (completionTimerRef.current) {
             window.clearTimeout(completionTimerRef.current)
@@ -204,7 +306,15 @@ export const OpenAIRealtimeVoiceSessionProvider = ({ children }: PropsWithChildr
         }
         setVoiceState(completionPathRef.current ? 'thinking' : 'listening')
       })
-      session.on('audio_interrupted', () => setVoiceState('listening'))
+      session.on('audio_interrupted', () => {
+        // Barge-in: corta estado de habla y deja listo para escuchar.
+        if (introGuardActiveRef.current) {
+          // Durante el intro no debería pasar; si pasa, rearmamos el guard.
+          setVoiceState('speaking')
+          return
+        }
+        setVoiceState('listening')
+      })
       session.on('agent_tool_start', () => setVoiceState('thinking'))
       session.on('agent_tool_end', () => setVoiceState('thinking'))
       session.on('history_updated', (history) => {
@@ -235,7 +345,7 @@ export const OpenAIRealtimeVoiceSessionProvider = ({ children }: PropsWithChildr
       session.on('error', (event) => {
         setError({
           code: 'realtime_error',
-          message: 'No pudimos iniciar la conversación de voz. Puedes continuar por texto.',
+          message: 'No pudimos iniciar la conversación de voz. Inténtalo de nuevo.',
         })
         setVoiceState('error')
         // Avoid logging secrets or full payloads.
@@ -250,9 +360,25 @@ export const OpenAIRealtimeVoiceSessionProvider = ({ children }: PropsWithChildr
       setIsConnected(true)
       setVoiceState('listening')
 
-      // Kick off agent turn without showing this as a user message.
+      // Protección de intro (B): mic mute + sin interrupt hasta que termine el saludo.
+      introGuardActiveRef.current = true
+      introSpeechSeenRef.current = false
+      userMutedRef.current = false
+      setMicEnabled(false)
+      if (introGuardTimerRef.current) {
+        window.clearTimeout(introGuardTimerRef.current)
+      }
+      introGuardTimerRef.current = window.setTimeout(() => {
+        endIntroGuard()
+      }, INTRO_GUARD_MAX_MS)
+
+      // Kick off without a fake user bubble; context already in instructions.
       session.sendMessage(
-        'Inicia la orientación de vivienda. Consulta primero el contexto actual y luego saluda de forma breve.',
+        'Inicia ahora como Laura: saludo corto + marco humano ' +
+          '("unas preguntas sencillas, tipo dos o tres minutos") + ' +
+          'pregunta si lo hacen ahora o más tarde. ' +
+          'Si opening_hint ya trae eso, reformúlalo natural. ' +
+          'No suenes a formulario. Si ya tienes next_question/contexto, no llames tools primero.',
       )
     } catch (err) {
       await cleanup()
@@ -268,12 +394,12 @@ export const OpenAIRealtimeVoiceSessionProvider = ({ children }: PropsWithChildr
         code,
         message:
           code === 'microphone_denied'
-            ? 'Necesitamos permiso del micrófono para continuar por voz. Puedes continuar por texto.'
-            : 'No pudimos iniciar la conversación de voz. Puedes continuar por texto.',
+            ? 'Necesitamos permiso del micrófono para continuar por voz. Pulsa Iniciar conversación e acéptalo.'
+            : 'No pudimos iniciar la conversación de voz. Inténtalo de nuevo.',
       })
       setVoiceState('error')
     }
-  }, [cleanup, scheduleNavigation])
+  }, [cleanup, endIntroGuard, scheduleNavigation, setMicEnabled])
 
   const stopSession = useCallback(async () => {
     await cleanup()
@@ -288,16 +414,25 @@ export const OpenAIRealtimeVoiceSessionProvider = ({ children }: PropsWithChildr
   const toggleMute = useCallback(() => {
     const next = !isMuted
     setIsMuted(next)
-    mediaStreamRef.current?.getAudioTracks().forEach((track) => {
-      track.enabled = !next
-    })
-    sessionRef.current?.mute(next)
-  }, [isMuted])
+    userMutedRef.current = next
+    // Durante el intro el mic ya está muteado; solo registra la preferencia del usuario.
+    if (introGuardActiveRef.current) return
+    setMicEnabled(!next)
+  }, [isMuted, setMicEnabled])
 
   const interrupt = useCallback(async () => {
-    sessionRef.current?.interrupt()
+    const session = sessionRef.current
+    if (!session) return
+    if (introGuardActiveRef.current) {
+      endIntroGuard()
+    }
+    try {
+      session.interrupt()
+    } catch {
+      // ignore if transport already stopped
+    }
     setVoiceState('listening')
-  }, [])
+  }, [endIntroGuard])
 
   const submitTextResponse = useCallback(async (text: string) => {
     setTranscript(text)

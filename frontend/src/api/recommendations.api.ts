@@ -6,7 +6,12 @@ const RECOMMENDATION_TIMEOUT_MS = 90_000
 
 export const getRecommendations = async (
   leadId: string,
-  options?: { limit?: number; includeUnavailable?: boolean; minScore?: number },
+  options?: {
+    limit?: number
+    includeUnavailable?: boolean
+    minScore?: number
+    preferOpenai?: boolean
+  },
 ) =>
   (
     await apiClient.get<RecommendationResponse>(`/api/v1/leads/${leadId}/recommendations`, {
@@ -14,7 +19,9 @@ export const getRecommendations = async (
         limit: options?.limit,
         include_unavailable: options?.includeUnavailable,
         min_score: options?.minScore,
+        prefer_openai: options?.preferOpenai,
       },
-      timeout: RECOMMENDATION_TIMEOUT_MS,
+      // Determinístico es rápido; OpenAI puede superar el timeout global.
+      timeout: options?.preferOpenai === false ? 20_000 : RECOMMENDATION_TIMEOUT_MS,
     })
   ).data

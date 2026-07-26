@@ -37,9 +37,21 @@ class IdentityService:
         self._affiliation = affiliation_service or AffiliationService()
         _ = question_service
 
+    def get_lead_by_document(
+        self,
+        *,
+        document_type: str,
+        document_number: str,
+    ) -> Lead | None:
+        """Return the persisted lead for a document, if any."""
+        return self._repository.get_by_document(document_type, document_number)
+
     def lookup(self, document_type: str, document_number: str) -> dict[str, Any]:
         """Lookup an identity without creating a lead."""
-        existing = self._repository.get_by_document(document_type, document_number)
+        existing = self.get_lead_by_document(
+            document_type=document_type,
+            document_number=document_number,
+        )
         if existing is not None:
             profile = self._profile_dict_from_lead(existing)
             return {
@@ -97,7 +109,10 @@ class IdentityService:
         """Return existing DB profile by document, or create a new lead."""
         now = datetime.now(UTC)
         doc_type = DocumentType(document_type.upper())
-        existing = self._repository.get_by_document(document_type, document_number)
+        existing = self.get_lead_by_document(
+            document_type=document_type,
+            document_number=document_number,
+        )
         if existing is not None:
             # "Continuar" reusa el perfil; "empezar desde cero" lo borra en BD.
             if not data_consent:

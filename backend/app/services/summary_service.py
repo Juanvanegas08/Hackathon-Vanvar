@@ -33,6 +33,8 @@ class SummaryService:
         self,
         lead: Lead,
         readiness: ReadinessResult | None = None,
+        *,
+        include_recommendations: bool = True,
     ) -> AdvisorSummaryResponse:
         """Create an advisor-facing structured summary."""
         evaluation = readiness or self._readiness.evaluate(lead)
@@ -71,7 +73,9 @@ class SummaryService:
 
         recommended_projects: list[dict[str, object]] = []
         recommendation_warning: str | None = None
-        if self._recommendation is None:
+        if not include_recommendations:
+            recommendation_warning = None
+        elif self._recommendation is None:
             recommendation_warning = (
                 "El motor de recomendaciones todavía no tiene perfiles "
                 "de proyectos disponibles."

@@ -6,8 +6,8 @@ from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID, uuid4
 
-from sqlalchemy import select
-from sqlalchemy.orm import Session
+from sqlalchemy import and_, select
+from sqlalchemy.orm import Session, aliased
 
 from app.core.config import Settings, get_settings
 from app.core.exceptions import NotFoundError
@@ -19,19 +19,23 @@ from app.db.models.leads import (
     LeadProfile,
 )
 from app.db.sync_engine import get_sync_session_factory, sync_session_scope
-from app.models.lead import DataSource, Lead
+from app.models.lead import DataSource, DocumentType, IdentityStatus, Lead
 from app.repositories.lead_mapping import (
     build_profile_columns,
+    db_status_to_domain,
     domain_lead_from_rows,
     domain_status_to_db,
     split_display_name,
 )
 from app.services.profile_persistence_service import ProfilePersistenceService
+from app.utils.commercial_affinity import parse_commercial_snapshot
 from app.utils.identity_hash import (
+    candidate_identifier_hashes,
     hash_identifier,
     mask_document_last_four,
     normalize_document_number,
 )
+from app.utils.phone import is_reassignable_demo_phone, resolve_callable_phone
 
 
 class PostgresLeadRepository:
@@ -59,8 +63,165 @@ class PostgresLeadRepository:
 
     def list_all(self) -> list[Lead]:
         with sync_session_scope(self._settings) as session:
-            rows = session.scalars(select(LeadRow).order_by(LeadRow.created_at.desc())).all()
-            return [self._to_domain(session, row) for row in rows]
+            PhoneContact = aliased(ContactPoint)
+            EmailContact = aliased(ContactPoint)
+
+            rows = session.execute(
+                select(
+                    LeadRow,
+                    Person,
+                    LeadProfile,
+                    PersonIdentifier,
+                    PhoneContact,
+                    EmailContact,
+                )
+                .outerjoin(Person, Person.id == LeadRow.person_id)
+                .outerjoin(LeadProfile, LeadProfile.lead_id == LeadRow.id)
+                .outerjoin(
+                    PersonIdentifier,
+                    and_(
+                        PersonIdentifier.person_id == LeadRow.person_id,
+                        PersonIdentifier.is_primary.is_(True),
+                    ),
+                )
+                .outerjoin(
+                    PhoneContact,
+                    and_(
+                        PhoneContact.person_id == LeadRow.person_id,
+                        PhoneContact.contact_type == "phone",
+                        PhoneContact.is_primary.is_(True),
+                    ),
+                )
+                .outerjoin(
+                    EmailContact,
+                    and_(
+                        EmailContact.person_id == LeadRow.person_id,
+                        EmailContact.contact_type == "email",
+                        EmailContact.is_primary.is_(True),
+                    ),
+                )
+                .order_by(LeadRow.created_at.desc())
+            ).all()
+
+            leads: list[Lead] = []
+            seen: set[UUID] = set()
+            for lead_row, person, profile, identifier, phone, email in rows:
+                if lead_row.id in seen:
+                    continue
+                seen.add(lead_row.id)
+                leads.append(
+                    self._to_domain_cached(
+                        lead_row=lead_row,
+                        person=person,
+                        profile=profile,
+                        identifier=identifier,
+                        phone=phone,
+                        email=email,
+                    )
+                )
+            return leads
+
+    def list_advisor_queue(self) -> list[dict[str, Any]]:
+        """Compact rows for the advisor queue (one SQL round-trip)."""
+        with sync_session_scope(self._settings) as session:
+            rows = session.execute(
+                select(
+                    LeadRow.id,
+                    LeadRow.status,
+                    Person.display_name,
+                    LeadProfile.affiliated,
+                    LeadProfile.affiliation_category,
+                    LeadProfile.additional_preferences,
+                    LeadProfile.profile_document,
+                    PersonIdentifier.identifier_type,
+                    PersonIdentifier.identifier_ciphertext,
+                )
+                .outerjoin(Person, Person.id == LeadRow.person_id)
+                .outerjoin(LeadProfile, LeadProfile.lead_id == LeadRow.id)
+                .outerjoin(
+                    PersonIdentifier,
+                    and_(
+                        PersonIdentifier.person_id == LeadRow.person_id,
+                        PersonIdentifier.is_primary.is_(True),
+                    ),
+                )
+                .order_by(LeadRow.created_at.desc())
+            ).all()
+
+            items: list[dict[str, Any]] = []
+            seen: set[UUID] = set()
+            for (
+                lead_id,
+                status,
+                display_name,
+                affiliated,
+                affiliation_category,
+                extras,
+                document,
+                identifier_type,
+                identifier_ciphertext,
+            ) in rows:
+                if lead_id in seen:
+                    continue
+                seen.add(lead_id)
+
+                extras = extras if isinstance(extras, dict) else {}
+                document = document if isinstance(document, dict) else {}
+                contact = document.get("contact") if isinstance(document.get("contact"), dict) else {}
+                identity = document.get("identity") if isinstance(document.get("identity"), dict) else {}
+                affiliation = (
+                    document.get("affiliation")
+                    if isinstance(document.get("affiliation"), dict)
+                    else {}
+                )
+                commercial_raw = None
+                if isinstance(document.get("commercial"), dict):
+                    commercial_raw = document.get("commercial")
+                elif isinstance(extras.get("commercial"), dict):
+                    commercial_raw = extras.get("commercial")
+                commercial = parse_commercial_snapshot(commercial_raw) or {}
+
+                if (
+                    commercial.get("affinity_percent") is None
+                    and not commercial.get("affinity_band")
+                ):
+                    continue
+
+                afiliado = affiliation.get("afiliado")
+                if afiliado is None:
+                    afiliado = affiliated
+
+                categoria = affiliation.get("categoria_afiliacion") or affiliation_category
+                doc_type = identity.get("document_type") or identifier_type
+                doc_number = identity.get("document_number") or (
+                    normalize_document_number(identifier_ciphertext)
+                    if identifier_ciphertext
+                    else None
+                )
+
+                items.append(
+                    {
+                        "id": lead_id,
+                        "nombre": contact.get("nombre") or display_name,
+                        "document_type": doc_type,
+                        "document_number": doc_number,
+                        "afiliado": afiliado,
+                        "categoria_afiliacion": categoria,
+                        "afiliacion_confirmada": bool(
+                            affiliation.get("afiliacion_confirmada", False)
+                        ),
+                        "canal_origen": contact.get("canal_origen")
+                        or extras.get("canal_origen")
+                        or "desconocido",
+                        "affinity_percent": commercial.get("affinity_percent"),
+                        "affinity_band": commercial.get("affinity_band"),
+                        "top_project_id": commercial.get("top_project_id"),
+                        "top_project_name": commercial.get("top_project_name"),
+                        "estado_lead": db_status_to_domain(status).value,
+                        "status": db_status_to_domain(status).value,
+                    }
+                )
+            return items
 
     def update(self, lead: Lead) -> Lead:
         with sync_session_scope(self._settings) as session:
@@ -84,18 +245,21 @@ class PostgresLeadRepository:
         *,
         country_code: str = "CO",
     ) -> Lead | None:
-        identifier_hash = hash_identifier(
-            document_type=document_type,
-            document_number=document_number,
-            country_code=country_code,
+        doc_type = document_type.strip().upper()
+        doc_number = normalize_document_number(document_number)
+        country = (country_code or "CO").strip().upper()
+        hashes = candidate_identifier_hashes(
+            document_type=doc_type,
+            document_number=doc_number,
+            country_code=country,
             pepper=self._settings.identity_hash_pepper,
         )
         with sync_session_scope(self._settings) as session:
             identifier = session.scalar(
                 select(PersonIdentifier).where(
-                    PersonIdentifier.identifier_type == document_type.strip().upper(),
-                    PersonIdentifier.country_code == country_code.upper(),
-                    PersonIdentifier.identifier_hash == identifier_hash,
+                    PersonIdentifier.identifier_type == doc_type,
+                    PersonIdentifier.country_code == country,
+                    PersonIdentifier.identifier_hash.in_(hashes),
                 )
             )
             if identifier is None:
@@ -107,12 +271,23 @@ class PostgresLeadRepository:
                 .limit(1)
             )
             if lead_row is None:
-                return None
+                # Historical synthetic persons exist in identity.* without a lead.
+                # Attach a lead so phone/identity flows can reuse name + phone.
+                lead_row = self._attach_lead_for_person(
+                    session,
+                    person_id=identifier.person_id,
+                    document_type=doc_type,
+                    document_number=doc_number
+                    or normalize_document_number(
+                        identifier.identifier_ciphertext or ""
+                    ),
+                )
             return self._to_domain(
                 session,
                 lead_row,
-                document_type=document_type.strip().upper(),
-                document_number=normalize_document_number(document_number),
+                document_type=doc_type,
+                document_number=doc_number
+                or normalize_document_number(identifier.identifier_ciphertext or ""),
             )
 
     def save_profile(self, lead: Lead) -> Lead:
@@ -351,15 +526,34 @@ class PostgresLeadRepository:
                 )
             )
             masked = value[-4:] if contact_type == "phone" else value
-            if existing is None:
-                # Skip insert if another person already owns this contact hash.
-                collision = session.scalar(
-                    select(ContactPoint).where(
-                        ContactPoint.contact_type == contact_type,
-                        ContactPoint.value_hash == value_hash,
-                    )
+            # Global uniqueness: (contact_type, value_hash).
+            collision = session.scalar(
+                select(ContactPoint).where(
+                    ContactPoint.contact_type == contact_type,
+                    ContactPoint.value_hash == value_hash,
                 )
+            )
+            can_reassign = contact_type == "phone" and is_reassignable_demo_phone(
+                raw_value
+            )
+
+            if (
+                collision is not None
+                and collision.person_id != person_id
+                and can_reassign
+            ):
+                # Provisional demo reuse: move the shared phone to this person.
+                if existing is not None and existing.id != collision.id:
+                    session.delete(existing)
+                    session.flush()
+                collision.person_id = person_id
+                collision.masked_value = masked
+                collision.is_primary = True
+                continue
+
+            if existing is None:
                 if collision is not None:
+                    # Another person already owns this contact hash.
                     continue
                 session.add(
                     ContactPoint(
@@ -371,10 +565,19 @@ class PostgresLeadRepository:
                         is_primary=True,
                     )
                 )
-            else:
-                existing.value_hash = value_hash
+                continue
+
+            if existing.value_hash == value_hash:
                 existing.masked_value = masked
                 existing.is_primary = True
+                continue
+
+            if collision is not None and collision.id != existing.id:
+                continue
+
+            existing.value_hash = value_hash
+            existing.masked_value = masked
+            existing.is_primary = True
 
     def _upsert_field_metadata(
         self,
@@ -408,6 +611,95 @@ class PostgresLeadRepository:
                 row.confirmed_at = now if meta.confirmed else row.confirmed_at
                 row.metadata_ = payload
 
+    def _attach_lead_for_person(
+        self,
+        session: Session,
+        *,
+        person_id: UUID,
+        document_type: str,
+        document_number: str,
+    ) -> LeadRow:
+        now = datetime.now(UTC)
+        person = session.get(Person, person_id)
+        phone = session.scalar(
+            select(ContactPoint).where(
+                ContactPoint.person_id == person_id,
+                ContactPoint.contact_type == "phone",
+                ContactPoint.is_primary.is_(True),
+            )
+        )
+        email = session.scalar(
+            select(ContactPoint).where(
+                ContactPoint.person_id == person_id,
+                ContactPoint.contact_type == "email",
+                ContactPoint.is_primary.is_(True),
+            )
+        )
+        phone_value = self._contact_raw_value(phone)
+        email_value = self._contact_raw_value(email)
+        display_name = person.display_name if person else None
+        raw_status = (
+            (person.identity_status if person and person.identity_status else None)
+            or IdentityStatus.KNOWN_AFFILIATE.value
+        )
+        try:
+            identity_status = IdentityStatus(raw_status)
+        except ValueError:
+            identity_status = IdentityStatus.KNOWN_AFFILIATE
+        try:
+            doc_type = DocumentType(document_type)
+        except ValueError:
+            doc_type = DocumentType.CC
+
+        lead_row = LeadRow(
+            id=uuid4(),
+            person_id=person_id,
+            known_lead=True,
+            identity_status=identity_status.value,
+            status="new",
+            current_profile_version=1,
+        )
+        session.add(lead_row)
+        session.flush()
+
+        draft = Lead(
+            id=lead_row.id,
+            nombre=display_name,
+            telefono=resolve_callable_phone(phone_value) or phone_value,
+            correo=email_value,
+            document_type=doc_type,
+            document_number=document_number,
+            known_lead=True,
+            identity_status=identity_status,
+            demo_mode=bool(person.is_demo) if person else True,
+            profile_source=DataSource.HISTORICAL_DATA,
+        )
+        document = self._profiles.build_document(draft)
+        columns = build_profile_columns(draft, document)
+        session.add(LeadProfile(lead_id=lead_row.id, version=1, **columns))
+        session.add(
+            LeadEvent(
+                id=uuid4(),
+                lead_id=lead_row.id,
+                event_type="lead_attached_from_person",
+                actor_type="system",
+                metadata_={
+                    "source": "postgres_lead_repository",
+                    "person_id": str(person_id),
+                },
+                occurred_at=now,
+            )
+        )
+        session.flush()
+        return lead_row
+
+    @staticmethod
+    def _contact_raw_value(contact: ContactPoint | None) -> str | None:
+        if contact is None:
+            return None
+        raw = (contact.value_ciphertext or contact.masked_value or "").strip()
+        return raw or None
+
     def _to_domain(
         self,
         session: Session,
@@ -440,6 +732,31 @@ class PostgresLeadRepository:
                 ContactPoint.is_primary.is_(True),
             )
         )
+        return self._to_domain_cached(
+            lead_row=lead_row,
+            person=person,
+            profile=profile,
+            identifier=identifier,
+            phone=phone,
+            email=email,
+            document_type=document_type,
+            document_number=document_number,
+        )
+
+    def _to_domain_cached(
+        self,
+        *,
+        lead_row: LeadRow,
+        person: Person | None,
+        profile: LeadProfile | None,
+        identifier: PersonIdentifier | None,
+        phone: ContactPoint | None,
+        email: ContactPoint | None,
+        document_type: str | None = None,
+        document_number: str | None = None,
+    ) -> Lead:
+        phone_value = self._contact_raw_value(phone)
+        email_value = self._contact_raw_value(email)
         return domain_lead_from_rows(
             lead_id=lead_row.id,
             person_display_name=person.display_name if person else None,
@@ -449,7 +766,14 @@ class PostgresLeadRepository:
             profile=profile,
             document_type=document_type
             or (identifier.identifier_type if identifier else None),
-            document_number=document_number,
-            phone=phone.masked_value if phone else None,
-            email=email.masked_value if email else None,
+            document_number=(
+                document_number
+                or (
+                    normalize_document_number(identifier.identifier_ciphertext)
+                    if identifier and identifier.identifier_ciphertext
+                    else None
+                )
+            ),
+            phone=resolve_callable_phone(phone_value) or phone_value,
+            email=email_value,
         )
