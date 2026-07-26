@@ -174,9 +174,9 @@ export const OpenAIRealtimeVoiceSessionProvider = ({ children }: PropsWithChildr
 
   const scheduleNavigation = useCallback((path: string) => {
     completionPathRef.current = path
-    closingSpeechStartedRef.current = false
+    // No resetear closingSpeechStarted si ya empezó a hablar el cierre.
     if (completionTimerRef.current) window.clearTimeout(completionTimerRef.current)
-    // Fallback si por alguna razón no llega audio_stopped tras el cierre.
+    // Fallback más corto: si no llega audio_stopped, igual vamos a resultados.
     completionTimerRef.current = window.setTimeout(() => {
       void cleanup().then(() => {
         setVoiceState('completed')
@@ -184,7 +184,7 @@ export const OpenAIRealtimeVoiceSessionProvider = ({ children }: PropsWithChildr
         completionPathRef.current = null
         closingSpeechStartedRef.current = false
       })
-    }, 28_000)
+    }, 14_000)
   }, [cleanup])
 
   const startSession = useCallback(async (leadId?: string) => {
@@ -514,7 +514,10 @@ export const OpenAIRealtimeVoiceSessionProvider = ({ children }: PropsWithChildr
       onNavigateRef.current = custom.detail
     }
     window.addEventListener('casalista-voice-navigate', handler as EventListener)
-    return () => window.removeEventListener('casalista-voice-navigate', handler as EventListener)
+    // Avisa a ConversationPage para que (re)publique el navigate.
+    window.dispatchEvent(new CustomEvent('casalista-voice-ready'))
+    return () =>
+      window.removeEventListener('casalista-voice-navigate', handler as EventListener)
   }, [])
 
   return <VoiceSessionContext.Provider value={value}>{children}</VoiceSessionContext.Provider>
