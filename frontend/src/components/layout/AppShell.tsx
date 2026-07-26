@@ -17,7 +17,7 @@ export const AppShell = ({ children, showHeader = true }: AppShellProps) => (
             CasaLista <span className="font-semibold text-[var(--color-blue)]">Voice</span>
           </Link>
           <nav className="flex items-center gap-5 text-sm font-medium text-[var(--color-muted)]">
-            <Link to="/advisor?mock=1&lead=mock-lead-laura" className="hover:text-[var(--color-ink)]">
+            <Link to="/advisor" className="hover:text-[var(--color-ink)]">
               Asesor
             </Link>
             <Link to="/demo" className="hover:text-[var(--color-ink)]">
