@@ -81,10 +81,11 @@ Reglas operativas:
 5. El backend es la única fuente de verdad.
 6. Al inicio: saludo humano + marco 2–3 min + si ahora o más tarde (usa opening_hint si viene). SIN tools primero si ya tienes contexto.
 7. Tras submit_current_answer accepted=true: usa next_question del resultado. NO get_voice_context.
+7b. DESYNC (CRÍTICO): NUNCA inventes ni saltes a otra pregunta. Solo avanzas si accepted=true. Si accepted=false o clarification_required=true: di SOLO la pregunta en next_question (reformulada corta) y en el próximo submit usa exactamente next_question.field. No digas "repíteme" de forma genérica: reformula esa pregunta concreta una vez.
 8. Sentimiento: no uses report_user_engagement entre turnos. Al cerrar es OBLIGATORIO: pásala en complete_voice_profile (engagement_label/score/reason). Elige la etiqueta DOMINANTE (emoción o tono) que más ayude al asesor humano.
 9. submit_current_answer SOLO si es RESPUESTA real. Enums: situacion_crediticia (sin_reportes, al_dia, atrasos_menores, atrasos_mayores, en_proceso_normalizacion, desconocida); plazo_compra (inmediato, 3_meses, 6_meses, 12_meses, mas_de_un_ano, no_definido). proyecto_interes opcional: "lo que me recomiendes"/skip → normalizedValue="sin preferencia".
 10. No afirmes que guardaste hasta accepted=true (y ni así lo digas en voz).
-11. Si rechazan por duda: responde corto; luego retoma. Si inválida: repregunta en una frase. Sin menús.
+11. Si rechazan por duda: responde corto; luego retoma next_question. Si inválida: UNA repregunta corta de next_question. Sin menús. Sin inventar la siguiente.
 12. No repitas datos ya confirmados.
 13. Confirma ingresos/ahorros/obligaciones con pregunta corta.
 14. No prometas aprobación de crédito ni vivienda garantizada.
@@ -224,18 +225,27 @@ export const createCasaListaRealtimeAgent = (options: CasaListaAgentOptions) => 
   const rejectGuidance = (
     reason: string,
     kind: 'question' | 'non_answer' | 'invalid' = 'invalid',
+    activeQuestion?: { field: string; question: string } | null,
   ) => {
+    const q = activeQuestion?.question?.trim()
+    const field = activeQuestion?.field
+    const askLine = q
+      ? `Di SOLO esta pregunta reformulada en ≤12 palabras (field=${field}): "${q}". No inventes otra.`
+      : 'Repregunta SOLO el campo activo en una frase. No inventes otra pregunta.'
     const assistant_guidance =
       kind === 'question'
-        ? `${reason} NO guardes nada. Contesta en 1–2 frases cortas y retoma la pregunta activa. Sin muletillas.`
-        : kind === 'non_answer'
-          ? `${reason} NO guardes nada. Repregunta el dato en una sola frase corta. Sin menús.`
-          : `${reason} NO guardes nada. Repregunta el campo activo en una frase. Sin menús continuar/editar.`
+        ? `${reason} NO guardes nada. Contesta en 1–2 frases cortas y luego: ${askLine}`
+        : `${reason} NO guardes nada. ${askLine} Sin menús ni "repíteme" genérico.`
     return JSON.stringify({
       accepted: false,
       clarification_required: true,
       user_turn_kind: kind,
+      active_field: field ?? null,
+      next_question: activeQuestion
+        ? { field: activeQuestion.field, question: activeQuestion.question }
+        : null,
       assistant_guidance,
+      speak_now: askLine,
       validation_message: reason,
     })
   }
@@ -244,9 +254,9 @@ export const createCasaListaRealtimeAgent = (options: CasaListaAgentOptions) => 
     name: 'submit_current_answer',
     description:
       'Guarda un dato del perfil SOLO cuando el usuario realmente RESPONDE la pregunta activa. ' +
-      'Antes de llamar, clasifica el turno con userIntent. ' +
-      'Si el usuario pregunta o tiene una duda: userIntent="question", answersCurrentQuestion=false (o no llames la tool) y CONTÉSTALE en voz. ' +
-      'Nunca trates una pregunta como si fuera el valor del campo.',
+      'field DEBE ser el de next_question activo (no inventes otro). ' +
+      'Si accepted=false, pregunta SOLO next_question del resultado y reintenta con ese field. ' +
+      'Si el usuario pregunta o tiene una duda: userIntent="question", answersCurrentQuestion=false y CONTÉSTALE en voz.',
     parameters: z.object({
       field: z.string(),
       rawTranscript: z.string(),
@@ -295,6 +305,7 @@ export const createCasaListaRealtimeAgent = (options: CasaListaAgentOptions) => 
         return rejectGuidance(
           'El usuario está preguntando o pidiendo aclaración, no respondiendo el campo.',
           'question',
+          { field, question: '' },
         )
       }
       if (
@@ -309,12 +320,14 @@ export const createCasaListaRealtimeAgent = (options: CasaListaAgentOptions) => 
           effectiveIntent === 'filler' || effectiveIntent === 'off_topic'
             ? 'non_answer'
             : 'invalid',
+          { field, question: '' },
         )
       }
       if (!deferProject && looksLikeNonAnswer(rawTranscript)) {
         return rejectGuidance(
           'El audio/transcript no contiene una respuesta usable al campo.',
           'non_answer',
+          { field, question: '' },
         )
       }
       if (
@@ -326,6 +339,7 @@ export const createCasaListaRealtimeAgent = (options: CasaListaAgentOptions) => 
         return rejectGuidance(
           'No hay normalizedValue usable para la pregunta activa.',
           'invalid',
+          { field, question: '' },
         )
       }
 
@@ -339,11 +353,21 @@ export const createCasaListaRealtimeAgent = (options: CasaListaAgentOptions) => 
         new CustomEvent('casalista-lead-updated', { detail: { leadId } }),
       )
       if (!result.accepted || result.clarification_required) {
+        const active = result.next_question
+          ? {
+              field: result.next_question.field,
+              question: result.next_question.question,
+            }
+          : { field, question: '' }
         const looksQuestion = looksLikeUserQuestion(rawTranscript)
+        const askLine = active.question
+          ? `Di SOLO esta pregunta reformulada en ≤12 palabras (field=${active.field}): "${active.question}". No inventes otra ni digas que avanzaste.`
+          : `Repregunta SOLO el campo activo ${active.field} en una frase. No inventes otra.`
         return JSON.stringify({
           accepted: false,
           clarification_required: true,
-          field: result.next_question?.field ?? field,
+          active_field: active.field,
+          field: active.field,
           next_question: result.next_question
             ? {
                 field: result.next_question.field,
@@ -353,8 +377,10 @@ export const createCasaListaRealtimeAgent = (options: CasaListaAgentOptions) => 
             : null,
           user_turn_kind: looksQuestion ? 'question' : 'invalid',
           assistant_guidance: looksQuestion
-            ? 'Contesta en 1–2 frases y retoma la pregunta activa. Sin esperas ni menús.'
-            : 'Repregunta el mismo campo en una frase corta. Sin "un segundo" ni menús.',
+            ? `Contesta en 1–2 frases y luego: ${askLine}`
+            : askLine,
+          speak_now: askLine,
+          validation_message: result.validation_message ?? null,
         })
       }
       return JSON.stringify({
@@ -372,7 +398,7 @@ export const createCasaListaRealtimeAgent = (options: CasaListaAgentOptions) => 
         speak_now:
           result.profile_completed
             ? 'Llama complete_voice_profile ya. No digas que vas a analizar.'
-            : 'Di SOLO la siguiente pregunta (≤12 palabras). Sin muletillas, eco ni "un segundo".',
+            : 'Di SOLO la siguiente pregunta de next_question (≤12 palabras). Sin muletillas. Usa ese field en el próximo submit.',
       })
     },
   })
