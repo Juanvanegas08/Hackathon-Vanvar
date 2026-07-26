@@ -236,25 +236,22 @@ class VoiceOrchestrationService:
             )
 
         expected = next_response.next_question
+        field_was_rebinding = False
         if payload.field != expected.field:
-            return VoiceAnswerResponse(
-                accepted=False,
-                clarification_required=True,
-                assistant_guidance=(
-                    f"Continúa con la pregunta actual sobre {expected.field}."
-                ),
-                validation_message=(
-                    "El campo enviado no coincide con la pregunta activa."
-                ),
-                next_question=expected,
-                progress=compute_profile_progress(lead),
-            )
+            # Laura a veces se adelanta verbalmente y manda otro field mientras el
+            # backend sigue en la pregunta no guardada. Re-anclar al campo activo
+            # evita el bucle eterno de "repíteme" / clarification_required.
+            field_was_rebinding = True
+            payload = payload.model_copy(update={"field": expected.field})
 
         if payload.action == "skip" and expected.required:
             return VoiceAnswerResponse(
                 accepted=False,
                 clarification_required=True,
-                assistant_guidance="Esta pregunta es necesaria para continuar.",
+                assistant_guidance=(
+                    "Esta pregunta es necesaria. Di SOLO esta pregunta, reformulada "
+                    f"corta: {expected.question}"
+                ),
                 validation_message="No se puede omitir esta pregunta.",
                 next_question=expected,
                 progress=compute_profile_progress(lead),
@@ -280,11 +277,12 @@ class VoiceOrchestrationService:
                 clarification_required=True,
                 assistant_guidance=(
                     "El usuario pregunta. Contesta en 1–2 frases cortas y retoma "
-                    f"la pregunta activa ({expected.field}). Sin menús ni esperas."
+                    f"SOLO esta pregunta: {expected.question}"
                     if is_question
                     else (
-                        "No fue una respuesta usable. Repregunta en una frase corta "
-                        f"el campo {expected.field}. Sin 'un segundo' ni menús."
+                        "No entendí la respuesta. Reformula en UNA frase SOLO esto "
+                        f"(campo {expected.field}): {expected.question}. "
+                        "No inventes otra pregunta ni digas que avances."
                     )
                 ),
                 validation_message=(
@@ -303,7 +301,16 @@ class VoiceOrchestrationService:
             return VoiceAnswerResponse(
                 accepted=False,
                 clarification_required=True,
-                assistant_guidance=self._clarification_for(expected),
+                assistant_guidance=(
+                    f"{self._clarification_for(expected)} "
+                    f"Pregunta activa ({expected.field}): {expected.question}. "
+                    "No avances a otra pregunta."
+                    + (
+                        " (Se re-ancló el field al activo por desfase.)"
+                        if field_was_rebinding
+                        else ""
+                    )
+                ),
                 validation_message=exc.message,
                 next_question=expected,
                 progress=compute_profile_progress(lead),

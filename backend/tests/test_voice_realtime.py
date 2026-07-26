@@ -284,24 +284,63 @@ def test_voice_context_new_lead(client: TestClient) -> None:
     assert body["profile_completed"] is False
 
 
-def test_voice_answer_rejects_wrong_field(client: TestClient) -> None:
-    lead_id = _create_known_lead(client)
+def test_voice_answer_rebounds_wrong_field_to_active(client: TestClient) -> None:
+    """If the agent submits the wrong field name, re-bind to the active question."""
+    lead_id = _create_new_lead(client)
     context = client.get(f"/api/v1/voice/leads/{lead_id}/context").json()
-    expected = context["next_question"]["field"]
-    wrong = "proyecto_interes" if expected != "proyecto_interes" else "ahorro"
+    field = context["next_question"]["field"]
+    if field in {"consentimiento", "data_consent"}:
+        client.post(
+            f"/api/v1/voice/leads/{lead_id}/answer",
+            json={"field": field, "normalized_value": True, "action": "answer"},
+        )
+        context = client.get(f"/api/v1/voice/leads/{lead_id}/context").json()
+        field = context["next_question"]["field"]
+    if field == "afiliado":
+        client.post(
+            f"/api/v1/voice/leads/{lead_id}/answer",
+            json={"field": "afiliado", "normalized_value": True, "action": "answer"},
+        )
+        context = client.get(f"/api/v1/voice/leads/{lead_id}/context").json()
+        field = context["next_question"]["field"]
+    assert field == "salario_mensual"
+    wrong = "proyecto_interes"
     response = client.post(
         f"/api/v1/voice/leads/{lead_id}/answer",
         json={
             "field": wrong,
-            "normalized_value": 1,
+            "normalized_value": 2_500_000,
             "action": "answer",
-            "raw_transcript": "dato incorrecto",
+            "raw_transcript": "dos millones quinientos",
+        },
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["accepted"] is True
+    assert body["updated_field"] == "salario_mensual"
+
+
+def test_voice_answer_rejects_non_answer_with_active_question(client: TestClient) -> None:
+    lead_id = _create_known_lead(client)
+    context = client.get(f"/api/v1/voice/leads/{lead_id}/context").json()
+    expected = context["next_question"]["field"]
+    response = client.post(
+        f"/api/v1/voice/leads/{lead_id}/answer",
+        json={
+            "field": expected,
+            "normalized_value": None,
+            "action": "answer",
+            "raw_transcript": "mmm",
         },
     )
     assert response.status_code == 200
     body = response.json()
     assert body["accepted"] is False
     assert body["clarification_required"] is True
+    assert body["next_question"]["field"] == expected
+    assert expected in (body["assistant_guidance"] or "") or body["next_question"][
+        "question"
+    ]
 
 
 def test_voice_answer_rejects_negative(client: TestClient) -> None:
