@@ -20,9 +20,6 @@ export const AppShell = ({ children, showHeader = true }: AppShellProps) => (
             <Link to="/advisor" className="hover:text-[var(--color-ink)]">
               Asesor
             </Link>
-            <Link to="/demo" className="hover:text-[var(--color-ink)]">
-              Escenarios
-            </Link>
             <Link
               to="/identification"
               className="rounded-full bg-[var(--color-ink)] px-4 py-2 text-white hover:bg-[var(--color-blue)]"
