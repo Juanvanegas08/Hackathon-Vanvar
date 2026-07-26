@@ -345,7 +345,7 @@ export const OpenAIRealtimeVoiceSessionProvider = ({ children }: PropsWithChildr
       session.on('error', (event) => {
         setError({
           code: 'realtime_error',
-          message: 'No pudimos iniciar la conversación de voz. Puedes continuar por texto.',
+          message: 'No pudimos iniciar la conversación de voz. Inténtalo de nuevo.',
         })
         setVoiceState('error')
         // Avoid logging secrets or full payloads.
@@ -394,8 +394,8 @@ export const OpenAIRealtimeVoiceSessionProvider = ({ children }: PropsWithChildr
         code,
         message:
           code === 'microphone_denied'
-            ? 'Necesitamos permiso del micrófono para continuar por voz. Puedes continuar por texto.'
-            : 'No pudimos iniciar la conversación de voz. Puedes continuar por texto.',
+            ? 'Necesitamos permiso del micrófono para continuar por voz. Pulsa Iniciar conversación e acéptalo.'
+            : 'No pudimos iniciar la conversación de voz. Inténtalo de nuevo.',
       })
       setVoiceState('error')
     }

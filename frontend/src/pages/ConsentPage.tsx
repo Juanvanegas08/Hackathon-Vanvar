@@ -1,25 +1,21 @@
 import { useMutation } from '@tanstack/react-query'
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Link, Navigate, useNavigate } from 'react-router-dom'
 import { motion } from 'framer-motion'
 import { createLeadFromIdentity } from '@/api/identity.api'
 import { AppShell } from '@/components/layout/AppShell'
 import { Button } from '@/components/ui/Button'
 import { ErrorState } from '@/components/ui/ErrorState'
+import { Spinner } from '@/components/ui/Spinner'
 import { useFlowStore } from '@/store/flowStore'
 import { getErrorMessage } from '@/utils/errors'
 
 export const ConsentPage = () => {
   const navigate = useNavigate()
-  const { documentType, documentNumber, lookupResult, setLeadId, setConsentGranted } = useFlowStore()
+  const { documentType, documentNumber, lookupResult, setLeadId, setConsentGranted } =
+    useFlowStore()
   const [error, setError] = useState<string | null>(null)
-  const [showKnownIntro, setShowKnownIntro] = useState(Boolean(lookupResult?.known_lead))
-
-  useEffect(() => {
-    if (!lookupResult?.known_lead) return
-    const timer = window.setTimeout(() => setShowKnownIntro(false), 2200)
-    return () => window.clearTimeout(timer)
-  }, [lookupResult?.known_lead])
+  const autoStarted = useRef(false)
 
   const createMutation = useMutation({
     mutationFn: (dataConsent: boolean) =>
@@ -27,21 +23,75 @@ export const ConsentPage = () => {
     onSuccess: (result, dataConsent) => {
       setConsentGranted(dataConsent)
       setLeadId(result.lead.id)
-      navigate(`/conversation/${result.lead.id}`)
+      navigate(`/conversation/${result.lead.id}`, { replace: true })
     },
     onError: (err) => setError(getErrorMessage(err)),
   })
+
+  const createLead = createMutation.mutate
+
+  const profile = lookupResult?.prefilled_profile ?? {}
+  const category =
+    typeof profile.categoria_afiliacion === 'string' ? profile.categoria_afiliacion : null
+  const company = typeof profile.empresa === 'string' ? profile.empresa : null
+  const affiliated = profile.afiliado === true
+  const hasUsefulPrefill = Boolean(
+    lookupResult &&
+      (lookupResult.prefilled_fields.length > 0 ||
+        affiliated ||
+        Boolean(category) ||
+        Boolean(company)),
+  )
+
+  // Sin datos útiles: saltar resumen/autorización y abrir conversación.
+  useEffect(() => {
+    if (!lookupResult || !documentNumber) return
+    if (hasUsefulPrefill) return
+    if (autoStarted.current) return
+    autoStarted.current = true
+    createLead(true)
+  }, [lookupResult, documentNumber, hasUsefulPrefill, createLead])
+
+  const [showKnownIntro, setShowKnownIntro] = useState(hasUsefulPrefill)
+
+  useEffect(() => {
+    if (!hasUsefulPrefill) return
+    const timer = window.setTimeout(() => setShowKnownIntro(false), 2200)
+    return () => window.clearTimeout(timer)
+  }, [hasUsefulPrefill])
 
   if (!lookupResult || !documentNumber) {
     return <Navigate to="/identification" replace />
   }
 
-  const profile = lookupResult.prefilled_profile
-  const category = typeof profile.categoria_afiliacion === 'string' ? profile.categoria_afiliacion : null
-  const company = typeof profile.empresa === 'string' ? profile.empresa : null
-  const affiliated = profile.afiliado === true
+  if (!hasUsefulPrefill) {
+    return (
+      <AppShell>
+        <div className="mx-auto flex min-h-[60vh] max-w-lg flex-col items-center justify-center gap-6 text-center">
+          {error ? (
+            <ErrorState
+              message={error}
+              onRetry={() => {
+                autoStarted.current = false
+                setError(null)
+                createMutation.mutate(true)
+              }}
+            />
+          ) : (
+            <>
+              <Spinner label="Preparando tu conversación con Laura" />
+              <p className="max-w-sm text-sm text-[var(--color-muted)]">
+                No encontramos información útil para precargar. Te llevamos con Laura para armar
+                tu perfil por voz.
+              </p>
+            </>
+          )}
+        </div>
+      </AppShell>
+    )
+  }
 
-  if (showKnownIntro && lookupResult.known_lead) {
+  if (showKnownIntro) {
     return (
       <AppShell>
         <motion.div
@@ -71,55 +121,46 @@ export const ConsentPage = () => {
         animate={{ opacity: 1, y: 0 }}
         className="mx-auto max-w-2xl py-10 text-left"
       >
-        {lookupResult.known_lead ? (
-          <div className="mb-8 rounded-[2rem] bg-white p-6 surface-shadow">
-            <h2 className="font-display text-2xl">Resumen no invasivo</h2>
-            <ul className="mt-4 space-y-2 text-[var(--color-muted)]">
+        <div className="mb-8 rounded-[2rem] bg-white p-6 surface-shadow">
+          <h2 className="font-display text-2xl">Resumen no invasivo</h2>
+          <ul className="mt-4 space-y-2 text-[var(--color-muted)]">
+            <li>
+              Afiliación:{' '}
+              <strong className="text-[var(--color-ink)]">
+                {affiliated ? 'Afiliado(a)' : 'No afiliado(a)'}
+              </strong>
+            </li>
+            {category && (
               <li>
-                Afiliación:{' '}
-                <strong className="text-[var(--color-ink)]">
-                  {affiliated ? 'Afiliado(a)' : 'No afiliado(a)'}
-                </strong>
+                Categoría: <strong className="text-[var(--color-ink)]">{category}</strong>
               </li>
-              {category && (
-                <li>
-                  Categoría:{' '}
-                  <strong className="text-[var(--color-ink)]">{category}</strong>
-                </li>
-              )}
-              {company && (
-                <li>
-                  Empresa:{' '}
-                  <strong className="text-[var(--color-ink)]">{company}</strong>
-                </li>
-              )}
+            )}
+            {company && (
               <li>
-                Datos que pueden precargarse:{' '}
-                <strong className="text-[var(--color-ink)]">
-                  {lookupResult.prefilled_fields.length}
-                </strong>
+                Empresa: <strong className="text-[var(--color-ink)]">{company}</strong>
               </li>
-            </ul>
-            <p className="mt-4 text-sm text-[var(--color-muted)]">
-              No mostramos salarios ni datos sensibles en este paso. La identidad permanece sin
-              verificar (sin OTP).
-            </p>
-          </div>
-        ) : (
-          <div className="mb-8">
-            <h1 className="font-display text-4xl sm:text-5xl">
-              No encontramos información previa, pero podemos construir tu perfil en pocos minutos.
-            </h1>
-          </div>
-        )}
+            )}
+            <li>
+              Datos que pueden precargarse:{' '}
+              <strong className="text-[var(--color-ink)]">
+                {lookupResult.prefilled_fields.length}
+              </strong>
+            </li>
+          </ul>
+          <p className="mt-4 text-sm text-[var(--color-muted)]">
+            No mostramos salarios ni datos sensibles en este paso. La identidad permanece sin
+            verificar (sin OTP).
+          </p>
+        </div>
 
         <h1 className="font-display text-3xl leading-tight sm:text-4xl">
-          ¿Nos autorizas a utilizar esta información para personalizar tu orientación de vivienda?
+          ¿Nos autorizas a usar esta información para personalizar tu orientación de vivienda?
         </h1>
         <p className="mt-4 text-[var(--color-muted)]">
-          <strong className="text-[var(--color-ink)]">Continuar</strong> retoma tu perfil
-          guardado. <strong className="text-[var(--color-ink)]">Empezar desde cero</strong>{' '}
-          borra en base de datos tu perfil, predisposición y recomendaciones previas.
+          <strong className="text-[var(--color-ink)]">Continuar</strong> usa tu perfil
+          encontrado.{' '}
+          <strong className="text-[var(--color-ink)]">Empezar desde cero</strong> ignora esos
+          datos y arma el perfil solo con la conversación.
         </p>
 
         {error && (
@@ -134,7 +175,7 @@ export const ConsentPage = () => {
             disabled={createMutation.isPending}
             onClick={() => createMutation.mutate(true)}
           >
-            Continuar donde me quedé
+            Continuar con mi perfil
           </Button>
           <Button
             variant="secondary"

@@ -1,28 +1,16 @@
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { AnimatePresence, motion } from 'framer-motion'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { motion } from 'framer-motion'
 import { Mic, MicOff, PhoneOff, VolumeX } from 'lucide-react'
-import { useCallback, useEffect, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
-import { confirmPrefilledData } from '@/api/identity.api'
-import {
-  evaluateLead,
-  getLead,
-  getNextQuestion,
-  getSummary,
-  updateLead,
-} from '@/api/leads.api'
-import { getRecommendations } from '@/api/recommendations.api'
-import type { NextQuestion } from '@/api/types'
+import { getLead } from '@/api/leads.api'
 import { ProfileSidebar } from '@/components/conversation/ProfileSidebar'
-import { QuestionPanel } from '@/components/conversation/QuestionPanel'
 import { VoiceOrb } from '@/components/conversation/VoiceOrb'
 import { AppShell } from '@/components/layout/AppShell'
 import { Button } from '@/components/ui/Button'
 import { ErrorState } from '@/components/ui/ErrorState'
 import { Spinner } from '@/components/ui/Spinner'
 import { useVoiceSession } from '@/providers/VoiceSessionProvider'
-import { adaptAnswer, isConfirmationPayload } from '@/utils/answerAdapter'
-import { getErrorMessage } from '@/utils/errors'
 import { setSessionLeadId } from '@/utils/session'
 
 export const ConversationPage = () => {
@@ -33,9 +21,6 @@ export const ConversationPage = () => {
     voiceState,
     startSession,
     stopSession,
-    setVoiceState,
-    setSubmitHandler,
-    submitTextResponse,
     providerName,
     isConnected,
     isMuted,
@@ -43,21 +28,12 @@ export const ConversationPage = () => {
     interrupt,
     error: voiceError,
     retry,
-    userTranscript,
-    assistantTranscript,
-    conversationHistory,
   } = useVoiceSession()
 
-  const [question, setQuestion] = useState<NextQuestion | null>(null)
-  const [completed, setCompleted] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [finishing, setFinishing] = useState(false)
-  const [showTextInput, setShowTextInput] = useState(true)
-  const [forceTextMode, setForceTextMode] = useState(providerName === 'mock')
-  const [historyOpen, setHistoryOpen] = useState(false)
-  const [voiceStarted, setVoiceStarted] = useState(false)
+  const [orbIntensity, setOrbIntensity] = useState(0.55)
 
-  const useRealtimeVoice = providerName === 'openai' && !forceTextMode
+  const useRealtimeVoice = providerName === 'openai'
 
   useEffect(() => {
     if (leadId) setSessionLeadId(leadId)
@@ -73,7 +49,6 @@ export const ConversationPage = () => {
 
   useEffect(() => {
     const handler = (path: string) => {
-      // El provider ya cerró la sesión de voz tras el speech de cierre.
       navigate(path)
     }
     window.dispatchEvent(new CustomEvent('casalista-voice-navigate', { detail: handler }))
@@ -86,99 +61,24 @@ export const ConversationPage = () => {
     retry: false,
   })
 
-  const loadQuestion = useCallback(async () => {
-    if (!leadId || useRealtimeVoice) return
-    setError(null)
-    setVoiceState('thinking')
-    try {
-      const next = await getNextQuestion(leadId)
-      if (next.completed || !next.next_question) {
-        setCompleted(true)
-        setQuestion(null)
-        setVoiceState('completed')
-        return
-      }
-      setQuestion(next.next_question)
-      setVoiceState(
-        next.next_question.type === 'confirmation' ? 'confirming' : 'speaking',
-      )
-      window.setTimeout(() => setVoiceState('listening'), 700)
-    } catch (err) {
-      setError(getErrorMessage(err))
-      setVoiceState('idle')
-    }
-  }, [leadId, setVoiceState, useRealtimeVoice])
-
+  // Sync orb deformation with speaking state (organic pulse while Laura talks).
   useEffect(() => {
-    if (!useRealtimeVoice) {
-      void startSession(leadId)
-      void loadQuestion()
+    if (voiceState !== 'speaking') {
+      setOrbIntensity(0.2)
+      return
     }
-  }, [leadId, loadQuestion, startSession, useRealtimeVoice])
-
-  const finishProfile = useCallback(async () => {
-    if (!leadId || useRealtimeVoice) return
-    setFinishing(true)
-    setError(null)
-    setVoiceState('thinking')
-    try {
-      await evaluateLead(leadId)
-      await Promise.all([
-        getRecommendations(leadId, { limit: 3 }),
-        getSummary(leadId),
-      ])
-      navigate(`/results/${leadId}`)
-    } catch (err) {
-      setError(getErrorMessage(err))
-      setFinishing(false)
-      setVoiceState('idle')
-    }
-  }, [leadId, navigate, setVoiceState, useRealtimeVoice])
-
-  useEffect(() => {
-    if (!useRealtimeVoice && completed && !finishing) void finishProfile()
-  }, [completed, finishing, finishProfile, useRealtimeVoice])
-
-  const answerMutation = useMutation({
-    mutationFn: async (answer: string | boolean | number) => {
-      if (!leadId || !question) return
-      setVoiceState('thinking')
-      const payload = adaptAnswer(question, answer)
-      if (isConfirmationPayload(payload)) {
-        await confirmPrefilledData(leadId, payload)
-      } else {
-        await updateLead(leadId, payload)
-      }
-      await queryClient.invalidateQueries({ queryKey: ['lead', leadId] })
-      const next = await getNextQuestion(leadId)
-      if (next.completed || !next.next_question) {
-        setCompleted(true)
-        setQuestion(null)
-        setVoiceState('completed')
-        return
-      }
-      setQuestion(next.next_question)
-      setVoiceState(
-        next.next_question.type === 'confirmation' ? 'confirming' : 'speaking',
-      )
-      window.setTimeout(() => setVoiceState('listening'), 500)
-    },
-    onError: (err) => {
-      setError(getErrorMessage(err))
-      setVoiceState('listening')
-    },
-  })
-
-  useEffect(() => {
-    setSubmitHandler(async (text) => {
-      if (useRealtimeVoice && isConnected) {
-        await submitTextResponse(text)
-        return
-      }
-      await answerMutation.mutateAsync(text)
-    })
-    return () => setSubmitHandler(null)
-  }, [answerMutation, isConnected, setSubmitHandler, submitTextResponse, useRealtimeVoice])
+    let frame = 0
+    const timer = window.setInterval(() => {
+      frame += 1
+      const wave =
+        0.45 +
+        0.35 * Math.sin(frame / 3.2) +
+        0.2 * Math.sin(frame / 1.7) +
+        0.12 * Math.sin(frame / 0.9)
+      setOrbIntensity(Math.min(1, Math.max(0.35, wave)))
+    }, 90)
+    return () => window.clearInterval(timer)
+  }, [voiceState])
 
   useEffect(() => {
     if (!useRealtimeVoice || !isConnected || !leadId) return
@@ -186,7 +86,6 @@ export const ConversationPage = () => {
       void queryClient.invalidateQueries({ queryKey: ['lead', leadId] })
     }
     window.addEventListener('casalista-lead-updated', onLeadUpdated)
-    // Poll suave solo como respaldo (evita ráfagas cada pocos segundos).
     const timer = window.setInterval(onLeadUpdated, 12_000)
     return () => {
       window.removeEventListener('casalista-lead-updated', onLeadUpdated)
@@ -197,11 +96,13 @@ export const ConversationPage = () => {
   useEffect(() => {
     if (!leadQuery.isError) return
     const status = (leadQuery.error as { status?: number } | null)?.status
-    // Solo cortar sesión si el lead ya no existe; no por errores transitorios.
     if (status === 404) {
       void stopSession()
     }
   }, [leadQuery.error, leadQuery.isError, stopSession])
+
+  // El micrófono exige un clic del usuario: no autoiniciar.
+  // Se arranca solo con "Iniciar conversación".
 
   if (leadQuery.isLoading) {
     return (
@@ -218,15 +119,12 @@ export const ConversationPage = () => {
     if (status === 404 || status === 422) {
       const message =
         status === 422
-          ? 'Hubo un problema al actualizar tu perfil con una respuesta de voz. Empecemos de nuevo para continuar.'
-          : 'La sesión de demostración ya no está disponible. Podemos comenzar una nueva.'
+          ? 'Hubo un problema al actualizar tu perfil. Empecemos de nuevo.'
+          : 'La sesión ya no está disponible. Podemos comenzar una nueva.'
       return (
         <AppShell>
           <div className="mx-auto max-w-lg py-16">
-            <ErrorState
-              message={message}
-              onRetry={() => navigate('/identification')}
-            />
+            <ErrorState message={message} onRetry={() => navigate('/identification')} />
             <Link to="/" className="mt-4 inline-block text-[var(--color-blue)] hover:underline">
               Ir al inicio
             </Link>
@@ -234,222 +132,130 @@ export const ConversationPage = () => {
         </AppShell>
       )
     }
-    // Error transitorio de red: no tumbar la conversación de voz.
   }
+
+  const statusHint =
+    voiceState === 'connecting'
+      ? 'Conectando con Laura…'
+      : voiceState === 'speaking'
+        ? 'Laura está hablando. Toca el orbe o habla para interrumpir.'
+        : voiceState === 'listening'
+          ? 'Te escucha. Habla con naturalidad.'
+          : voiceState === 'thinking'
+            ? 'Un momento, Laura está procesando…'
+            : 'Conversación por voz con Laura'
 
   return (
     <AppShell>
-      <div className="grid gap-8 py-6 lg:grid-cols-[1.35fr_0.65fr]">
-        <section className="text-center lg:text-left">
-          <div className="mb-8 flex flex-col items-center gap-4 lg:items-start">
-            <VoiceOrb
-              state={finishing ? 'thinking' : voiceState}
-              onClick={
-                useRealtimeVoice && voiceState === 'speaking'
-                  ? () => void interrupt()
-                  : undefined
-              }
-            />
-            <p className="max-w-md text-sm text-[var(--color-muted)]">
-              {finishing
-                ? 'Estamos preparando tus mejores opciones.'
-                : useRealtimeVoice
-                  ? 'Habla con naturalidad. Si Laura está hablando, puedes interrumpirla tocando el orbe o hablando encima.'
-                  : 'Una pregunta a la vez. Puedes responder con botones o texto.'}
-            </p>
-          </div>
+      <div className="relative py-4 lg:py-8">
+        <div
+          aria-hidden
+          className="pointer-events-none absolute inset-x-0 -top-8 h-72 bg-[radial-gradient(ellipse_at_50%_0%,rgba(245,197,24,0.18),transparent_60%)]"
+        />
 
-          {(error || voiceError) && (
-            <div className="mb-6">
-              <ErrorState
-                message={voiceError?.message ?? error ?? 'Ocurrió un error.'}
-                onRetry={() => {
-                  if (voiceError) {
-                    void retry()
-                    return
+        <div className="relative grid gap-8 lg:grid-cols-[minmax(0,1.2fr)_minmax(280px,0.8fr)] lg:items-start">
+          <section className="flex flex-col items-center text-center">
+            <motion.div
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="w-full max-w-xl rounded-[2rem] border border-white/60 bg-white/55 px-6 py-10 shadow-[0_24px_80px_rgba(30,58,95,0.08)] backdrop-blur-md sm:px-10"
+            >
+              <p className="text-xs font-semibold uppercase tracking-[0.2em] text-[var(--color-green)]">
+                Laura · voz
+              </p>
+              <h1 className="mt-2 font-display text-3xl text-[var(--color-ink)] sm:text-4xl">
+                Conversación en vivo
+              </h1>
+
+              <div className="mt-6">
+                <VoiceOrb
+                  state={voiceState}
+                  intensity={orbIntensity}
+                  onClick={
+                    useRealtimeVoice && voiceState === 'speaking'
+                      ? () => void interrupt()
+                      : undefined
                   }
-                  void loadQuestion()
-                }}
-              />
-              {useRealtimeVoice && (
-                <div className="mt-3 flex flex-wrap gap-2">
-                  <Button
-                    variant="secondary"
-                    onClick={() => {
-                      setForceTextMode(true)
-                      void stopSession()
-                      void startSession(leadId)
-                      void loadQuestion()
+                />
+              </div>
+
+              <p className="mx-auto mt-2 max-w-md text-sm leading-relaxed text-[var(--color-muted)]">
+                {statusHint}
+              </p>
+
+              {(error || voiceError) && (
+                <div className="mt-6 text-left">
+                  <ErrorState
+                    message={voiceError?.message ?? error ?? 'Ocurrió un error.'}
+                    onRetry={() => {
+                      setError(null)
+                      if (voiceError) {
+                        void retry()
+                      }
                     }}
-                  >
-                    Continuar por texto
-                  </Button>
-                  <Button variant="ghost" onClick={() => navigate('/')}>
-                    Volver al inicio
-                  </Button>
+                  />
                 </div>
               )}
-            </div>
-          )}
 
-          {useRealtimeVoice && !voiceStarted && !isConnected && voiceState !== 'connecting' && (
-            <div className="mb-8 rounded-[2rem] bg-white p-6 text-left surface-shadow">
-              <h2 className="font-display text-2xl">¿Listo para hablar?</h2>
-              <p className="mt-2 text-[var(--color-muted)]">
-                Al continuar, el navegador pedirá permiso para usar tu micrófono.
-              </p>
-              <div className="mt-5 flex flex-wrap gap-3">
-                <Button
-                  className="min-h-12"
-                  onClick={() => {
-                    setVoiceStarted(true)
-                    void startSession(leadId)
-                  }}
-                >
-                  Iniciar conversación
-                </Button>
-                <Button
-                  variant="secondary"
-                  onClick={() => {
-                    setForceTextMode(true)
-                    void startSession(leadId)
-                    void loadQuestion()
-                  }}
-                >
-                  Prefiero continuar por texto
-                </Button>
-              </div>
-            </div>
-          )}
-
-          {useRealtimeVoice && (userTranscript || assistantTranscript) && (
-            <div className="mb-6 rounded-3xl border border-[var(--color-line)] bg-white/90 p-4 text-left text-sm">
-              {assistantTranscript && (
-                <p>
-                  <span className="font-semibold text-[var(--color-blue)]">Laura:</span>{' '}
-                  {assistantTranscript}
-                </p>
+              {!isConnected && voiceState !== 'connecting' && (
+                <div className="mt-8">
+                  <Button
+                    className="min-h-12 px-8"
+                    onClick={() => {
+                      setError(null)
+                      void startSession(leadId)
+                    }}
+                  >
+                    Iniciar conversación
+                  </Button>
+                  <p className="mt-3 text-xs text-[var(--color-muted)]">
+                    El navegador pedirá permiso de micrófono.
+                  </p>
+                </div>
               )}
-              {userTranscript && (
-                <p className="mt-2">
-                  <span className="font-semibold text-[var(--color-green)]">Tú:</span>{' '}
-                  {userTranscript}
-                </p>
+
+              {voiceState === 'connecting' && (
+                <div className="mt-8 flex justify-center">
+                  <Spinner label="Conectando voz" />
+                </div>
               )}
-              <button
-                type="button"
-                className="mt-3 text-xs font-semibold text-[var(--color-blue)]"
-                onClick={() => setHistoryOpen((value) => !value)}
-              >
-                {historyOpen ? 'Ocultar historial' : 'Ver historial'}
-              </button>
-              {historyOpen && (
-                <ul className="mt-3 max-h-40 space-y-2 overflow-y-auto text-[var(--color-muted)]">
-                  {conversationHistory.map((item) => (
-                    <li key={item.id}>
-                      <strong>{item.role === 'user' ? 'Tú' : 'Laura'}:</strong> {item.text}
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </div>
-          )}
 
-          <AnimatePresence mode="wait">
-            {!useRealtimeVoice && question && !finishing && showTextInput && (
-              <motion.div
-                key={question.field + question.question}
-                initial={{ opacity: 0, y: 16 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: -10 }}
-                transition={{ duration: 0.28 }}
-              >
-                <QuestionPanel
-                  question={question}
-                  disabled={answerMutation.isPending}
-                  onAnswer={(answer) => answerMutation.mutate(answer)}
-                />
-              </motion.div>
-            )}
-          </AnimatePresence>
-
-          {useRealtimeVoice && showTextInput && isConnected && (
-            <form
-              className="mt-4 flex flex-col gap-3 sm:flex-row"
-              onSubmit={(event) => {
-                event.preventDefault()
-                const form = event.currentTarget
-                const input = form.elements.namedItem('voice-text') as HTMLInputElement
-                const value = input.value.trim()
-                if (!value) return
-                void submitTextResponse(value)
-                input.value = ''
-              }}
-            >
-              <input
-                name="voice-text"
-                aria-label="Escribir respuesta"
-                className="w-full rounded-2xl border border-[var(--color-line)] bg-white px-4 py-3"
-                placeholder="También puedes escribir tu respuesta"
-              />
-              <Button type="submit" className="min-h-12">
-                Enviar
-              </Button>
-            </form>
-          )}
-
-          {(finishing || answerMutation.isPending || voiceState === 'connecting') && (
-            <div className="mt-8 flex justify-center lg:justify-start">
-              <Spinner
-                label={
-                  voiceState === 'connecting'
-                    ? 'Conectando voz'
-                    : finishing
-                      ? 'Preparando resultados'
-                      : 'Procesando respuesta'
-                }
-              />
-            </div>
-          )}
-
-          <div className="mt-8 flex flex-wrap items-center justify-center gap-3 lg:justify-start">
-            {useRealtimeVoice && isConnected && (
-              <>
-                <Button
-                  variant="secondary"
-                  className="gap-2"
-                  onClick={toggleMute}
-                  aria-label={isMuted ? 'Activar micrófono' : 'Silenciar micrófono'}
-                >
-                  {isMuted ? <MicOff size={16} aria-hidden /> : <Mic size={16} aria-hidden />}
-                  {isMuted ? 'Micrófono apagado' : 'Silenciar'}
-                </Button>
-                {voiceState === 'speaking' && (
+              {isConnected && (
+                <div className="mt-8 flex flex-wrap items-center justify-center gap-2">
                   <Button
                     variant="secondary"
                     className="gap-2"
-                    onClick={() => void interrupt()}
+                    onClick={toggleMute}
+                    aria-label={isMuted ? 'Activar micrófono' : 'Silenciar micrófono'}
                   >
-                    <VolumeX size={16} aria-hidden /> Interrumpir
+                    {isMuted ? <MicOff size={16} aria-hidden /> : <Mic size={16} aria-hidden />}
+                    {isMuted ? 'Micrófono apagado' : 'Silenciar'}
                   </Button>
-                )}
-                <Button
-                  variant="ghost"
-                  className="gap-2"
-                  onClick={() => void stopSession()}
-                >
-                  <PhoneOff size={16} aria-hidden /> Finalizar voz
-                </Button>
-              </>
-            )}
-            <Button variant="ghost" onClick={() => setShowTextInput((value) => !value)}>
-              {showTextInput ? 'Ocultar escritura' : 'Escribir respuesta'}
-            </Button>
-          </div>
-        </section>
+                  {voiceState === 'speaking' && (
+                    <Button
+                      variant="secondary"
+                      className="gap-2"
+                      onClick={() => void interrupt()}
+                    >
+                      <VolumeX size={16} aria-hidden /> Interrumpir
+                    </Button>
+                  )}
+                  <Button variant="ghost" className="gap-2" onClick={() => void stopSession()}>
+                    <PhoneOff size={16} aria-hidden /> Finalizar
+                  </Button>
+                </div>
+              )}
+            </motion.div>
+          </section>
 
-        <div className="lg:sticky lg:top-6 lg:self-start">
-          <ProfileSidebar lead={leadQuery.data} />
+          <motion.div
+            initial={{ opacity: 0, x: 12 }}
+            animate={{ opacity: 1, x: 0 }}
+            transition={{ delay: 0.08 }}
+            className="lg:sticky lg:top-6 lg:self-start"
+          >
+            <ProfileSidebar lead={leadQuery.data} />
+          </motion.div>
         </div>
       </div>
     </AppShell>
