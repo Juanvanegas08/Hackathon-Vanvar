@@ -85,19 +85,18 @@ export interface VoiceCompleteResponse {
   engagement_reason?: string | null
 }
 
-export type EngagementLabel =
-  | 'interesado'
-  | 'indeciso'
-  | 'molesto'
-  | 'trolleando'
-  | 'ocupado'
-  | 'desconocido'
+import type { EngagementLabel } from '@/utils/engagementDisplay'
+
+export type { EngagementLabel }
 
 export const createRealtimeClientSecret = async (leadId: string) =>
   (
-    await apiClient.post<RealtimeClientSecretResponse>('/api/v1/realtime/client-secret', {
-      lead_id: leadId,
-    })
+    await apiClient.post<RealtimeClientSecretResponse>(
+      '/api/v1/realtime/client-secret',
+      { lead_id: leadId },
+      // OpenAI puede tardar >15s del timeout global al mintar el secret.
+      { timeout: 60_000 },
+    )
   ).data
 
 export const getVoiceContext = async (leadId: string) =>

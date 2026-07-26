@@ -108,9 +108,9 @@ describe('advisorBriefing', () => {
     const insights = buildCallInsights(
       {
         ...leadBase,
-        engagement_label: 'interesado',
+        engagement_label: 'feliz',
         engagement_score: 90,
-        engagement_reason: 'Muy colaborador',
+        engagement_reason: 'Muy colaborador y cortés',
       },
       summaryBase,
       {
@@ -124,7 +124,12 @@ describe('advisorBriefing', () => {
     )
     expect(insights.some((item) => item.label === 'Identidad')).toBe(true)
     expect(insights.some((item) => item.label === 'Interés declarado')).toBe(true)
-    expect(insights.some((item) => item.label === 'Predisposición (Laura)')).toBe(true)
+    expect(insights.some((item) => item.label === 'Sentimiento (Laura)')).toBe(true)
+    expect(
+      insights.some(
+        (item) => item.label === 'Sentimiento (Laura)' && item.value.includes('Feliz') && item.Icon,
+      ),
+    ).toBe(true)
     expect(insights.some((item) => item.label === 'Afinidad vivienda')).toBe(true)
     expect(resolveLeadAffinity(leadBase, {
       project_id: 'p1',

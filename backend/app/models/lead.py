@@ -66,14 +66,27 @@ class CreditSituation(StrEnum):
 
 
 class EngagementLabel(StrEnum):
-    """Voice/LLM classification of user predisposition during the conversation."""
+    """Dominant user sentiment / tone for advisor follow-up (web + phone).
 
+    Pick the PRIMARY signal that best helps the human advisor approach the lead.
+    Emotion and courtesy beat generic commercial labels when clear.
+    """
+
+    FELIZ = "feliz"
+    TRISTE = "triste"
+    ENOJADO = "enojado"
+    CONSTERNADO = "consternado"
+    GROSERO = "grosero"
+    CORTES = "cortes"
     INTERESADO = "interesado"
     INDECISO = "indeciso"
-    MOLESTO = "molesto"
+    MOLESTO = "molesto"  # legacy alias ≈ enojado
     TROLLEANDO = "trolleando"
     OCUPADO = "ocupado"
     DESCONOCIDO = "desconocido"
+
+
+ENGAGEMENT_LABEL_VALUES: tuple[str, ...] = tuple(label.value for label in EngagementLabel)
 
 
 class QuestionFieldType(StrEnum):

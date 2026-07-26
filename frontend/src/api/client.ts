@@ -14,7 +14,7 @@ export class ApiError extends Error {
 
 const friendlyMessage = (error: AxiosError<{ detail?: unknown }>): string => {
   if (error.code === 'ECONNABORTED') {
-    return 'La solicitud tardó demasiado. El recomendador sigue procesando; inténtalo de nuevo en unos segundos.'
+    return 'La solicitud tardó demasiado. Inténtalo de nuevo en unos segundos.'
   }
   if (!error.response) {
     return 'No pudimos conectarnos con el servicio. Verifica que el backend esté disponible.'

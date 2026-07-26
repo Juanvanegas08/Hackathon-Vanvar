@@ -46,9 +46,9 @@ export const MOCK_ADVISOR_LEADS: LeadResponse[] = [
     affinity_band: 'listo',
     top_project_id: 'mongui',
     top_project_name: 'Monguí',
-    engagement_label: 'interesado',
+    engagement_label: 'feliz',
     engagement_score: 88,
-    engagement_reason: 'Colaboró con las preguntas y pidió opciones concretas',
+    engagement_reason: 'Ánimo positivo y cortés; pidió opciones concretas con entusiasmo',
   },
   {
     id: 'mock-lead-andres',
@@ -87,9 +87,9 @@ export const MOCK_ADVISOR_LEADS: LeadResponse[] = [
     affinity_band: 'por_evaluar',
     top_project_id: 'bosques-cajica',
     top_project_name: 'Bosques de Cajicá',
-    engagement_label: 'indeciso',
+    engagement_label: 'consternado',
     engagement_score: 55,
-    engagement_reason: 'Preguntó varias veces por precios y plazos sin decidir',
+    engagement_reason: 'Se oía preocupado por precios y plazos; tono cortés pero inseguro',
   },
   {
     id: 'mock-lead-sofia',
@@ -124,6 +124,9 @@ export const MOCK_ADVISOR_LEADS: LeadResponse[] = [
     affinity_band: 'baja_afinidad',
     top_project_id: 'villas-bosa',
     top_project_name: 'Villas de Bosa',
+    engagement_label: 'triste',
+    engagement_score: 42,
+    engagement_reason: 'Voz baja y desaliento por ingresos; no fue grosera, solo desanimada',
   },
 ]
 

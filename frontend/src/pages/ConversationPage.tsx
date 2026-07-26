@@ -39,6 +39,14 @@ export const ConversationPage = () => {
     if (leadId) setSessionLeadId(leadId)
   }, [leadId])
 
+  // El provider de voz es global: al salir de esta sección hay que apagar
+  // micrófono + WebRTC. Si no, Laura sigue viva en otras rutas.
+  useEffect(() => {
+    return () => {
+      void stopSession()
+    }
+  }, [leadId, stopSession])
+
   useEffect(() => {
     const handler = () => {
       void queryClient.invalidateQueries({ queryKey: ['lead', leadId] })

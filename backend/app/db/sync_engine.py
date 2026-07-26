@@ -22,6 +22,7 @@ def create_sync_engine(settings: Settings | None = None) -> Engine | None:
     url = cfg.get_database_url()
     if url is None:
         return None
+    connect_timeout = max(1, min(10, int(cfg.database_command_timeout_seconds or 30)))
     return create_engine(
         url,
         echo=cfg.database_echo,
@@ -30,6 +31,8 @@ def create_sync_engine(settings: Settings | None = None) -> Engine | None:
         max_overflow=cfg.database_max_overflow,
         pool_timeout=cfg.database_pool_timeout_seconds,
         pool_recycle=cfg.database_pool_recycle_seconds,
+        # Fail fast when VPN/host is unreachable (avoids 15s+ frontend hangs).
+        connect_args={"connect_timeout": connect_timeout},
     )
 
 

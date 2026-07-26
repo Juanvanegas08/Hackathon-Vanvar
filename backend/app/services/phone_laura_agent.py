@@ -15,7 +15,7 @@ from uuid import UUID
 
 from app.core.config import Settings, get_settings
 from app.core.exceptions import ConfigurationError, NotFoundError, ValidationBusinessError
-from app.models.lead import CanalOrigen, Lead
+from app.models.lead import ENGAGEMENT_LABEL_VALUES, CanalOrigen, Lead
 from app.schemas.realtime import (
     VoiceAnswerRequest,
     VoiceCompleteRequest,
@@ -201,23 +201,16 @@ def _tool_report_engagement() -> dict[str, Any]:
         "type": "function",
         "name": "report_user_engagement",
         "description": (
-            "Registra predisposición del usuario. Úsala casi nunca: solo 1 vez "
-            "al cierre o si el tono cambia de forma extrema. NUNCA entre turnos "
-            "normales (añade latencia)."
+            "Registra el sentimiento dominante del usuario para el asesor. "
+            "Úsala casi nunca: solo 1 vez al cierre o si el tono cambia de forma "
+            "extrema. NUNCA entre turnos normales (añade latencia)."
         ),
         "parameters": {
             "type": "object",
             "properties": {
                 "label": {
                     "type": "string",
-                    "enum": [
-                        "interesado",
-                        "indeciso",
-                        "molesto",
-                        "trolleando",
-                        "ocupado",
-                        "desconocido",
-                    ],
+                    "enum": list(ENGAGEMENT_LABEL_VALUES),
                 },
                 "score": {"type": ["number", "null"]},
                 "reason": {"type": ["string", "null"]},
@@ -234,7 +227,8 @@ def _tool_complete_profile() -> dict[str, Any]:
         "description": (
             "Finaliza el perfilamiento cuando no queden preguntas y prepara "
             "resultados. OBLIGATORIO: incluye engagement_label/score/reason del "
-            "tono de la persona. Puede tardar. No llames tools extras antes; "
+            "sentimiento dominante (feliz/triste/enojado/consternado/grosero/"
+            "cortes/interesado/…). Puede tardar. No llames tools extras antes; "
             "habla solo cuando tengas el resultado."
         ),
         "parameters": {
@@ -242,14 +236,7 @@ def _tool_complete_profile() -> dict[str, Any]:
             "properties": {
                 "engagement_label": {
                     "type": "string",
-                    "enum": [
-                        "interesado",
-                        "indeciso",
-                        "molesto",
-                        "trolleando",
-                        "ocupado",
-                        "desconocido",
-                    ],
+                    "enum": list(ENGAGEMENT_LABEL_VALUES),
                 },
                 "engagement_score": {"type": ["number", "null"]},
                 "engagement_reason": {"type": ["string", "null"]},
@@ -289,8 +276,8 @@ def _tool_end_call() -> dict[str, Any]:
         "description": (
             "Termina la llamada después de despedirte. Úsala si el usuario pide "
             "llamar más tarde, está ocupado, no quiere seguir, o se despide. "
-            "OBLIGATORIO: registra engagement_label (si no lo das, el backend "
-            "lo infiere del reason)."
+            "OBLIGATORIO: registra engagement_label del sentimiento dominante "
+            "(si no lo das, el backend lo infiere del reason)."
         ),
         "parameters": {
             "type": "object",
@@ -303,14 +290,7 @@ def _tool_end_call() -> dict[str, Any]:
                 "callback_note": {"type": "string"},
                 "engagement_label": {
                     "type": "string",
-                    "enum": [
-                        "interesado",
-                        "indeciso",
-                        "molesto",
-                        "trolleando",
-                        "ocupado",
-                        "desconocido",
-                    ],
+                    "enum": list(ENGAGEMENT_LABEL_VALUES),
                 },
                 "engagement_score": {"type": ["number", "null"]},
                 "engagement_reason": {"type": ["string", "null"]},
