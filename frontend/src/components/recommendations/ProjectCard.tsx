@@ -2,7 +2,7 @@ import { ExternalLink, FileText, MapPin } from 'lucide-react'
 import type { ProjectRecommendation } from '@/api/types'
 import { Badge } from '@/components/ui/Badge'
 import { Button } from '@/components/ui/Button'
-import { findBrochureForProject } from '@/data/brochures'
+import { resolveBrochureUrl } from '@/data/brochures'
 
 interface ProjectCardProps {
   project: ProjectRecommendation
@@ -13,13 +13,12 @@ export const ProjectCard = ({ project }: ProjectCardProps) => {
     ? [{ factor: 'reason', message: project.reason, contribution: 0 }]
     : (project.matched_factors ?? []).slice(0, 3)
 
-  const brochure = findBrochureForProject({
+  const brochureUrl = resolveBrochureUrl({
     projectId: project.project_id,
     canonicalId: project.canonical_project_id,
     projectName: project.project_name,
     brochureUrl: project.brochure_url,
   })
-  const brochureUrl = brochure?.url ?? project.brochure_url ?? null
 
   return (
     <article className="flex h-full flex-col rounded-3xl bg-white p-6 text-left surface-shadow">
@@ -77,13 +76,11 @@ export const ProjectCard = ({ project }: ProjectCardProps) => {
       )}
 
       <div className="mt-auto flex flex-wrap gap-2 pt-5">
-        {brochureUrl && (
-          <a href={brochureUrl} target="_blank" rel="noreferrer">
-            <Button className="gap-2">
-              <FileText size={16} aria-hidden /> Ver brochure
-            </Button>
-          </a>
-        )}
+        <a href={brochureUrl} target="_blank" rel="noreferrer">
+          <Button className="gap-2">
+            <FileText size={16} aria-hidden /> Ver brochure
+          </Button>
+        </a>
         {project.tour_360_url && (
           <a href={project.tour_360_url} target="_blank" rel="noreferrer">
             <Button variant="ghost" className="gap-2">

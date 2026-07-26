@@ -1,6 +1,6 @@
 import { FileText } from 'lucide-react'
 import type { ProjectRecommendation, RecommendationResponse } from '@/api/types'
-import { findBrochureForProject } from '@/data/brochures'
+import { resolveBrochureUrl } from '@/data/brochures'
 import { cn } from '@/utils/cn'
 
 export const AdvisorRecommendationsPanel = ({
@@ -45,13 +45,12 @@ export const AdvisorRecommendationsPanel = ({
       ) : (
         <ul className="mt-5 divide-y divide-[var(--color-line)] rounded-2xl border border-[var(--color-line)]">
           {projects.map((project: ProjectRecommendation, index) => {
-            const brochure = findBrochureForProject({
+            const brochureUrl = resolveBrochureUrl({
               projectId: project.project_id,
               canonicalId: project.canonical_project_id,
               projectName: project.project_name,
               brochureUrl: project.brochure_url,
             })
-            const brochureUrl = brochure?.url ?? project.brochure_url ?? null
             const affinity = Math.round(project.compatibility_score)
 
             return (
@@ -85,19 +84,15 @@ export const AdvisorRecommendationsPanel = ({
                   {affinity}%
                 </span>
 
-                {brochureUrl ? (
-                  <a
-                    href={brochureUrl}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="inline-flex shrink-0 items-center gap-1.5 rounded-full border border-[var(--color-line)] bg-white px-3 py-1.5 text-xs font-semibold text-[var(--color-ink)] transition hover:border-[var(--color-yellow)] hover:bg-[#fff9db]"
-                  >
-                    <FileText size={14} aria-hidden />
-                    Ver brochure
-                  </a>
-                ) : (
-                  <span className="shrink-0 text-xs text-[var(--color-muted)]">Sin brochure</span>
-                )}
+                <a
+                  href={brochureUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="inline-flex shrink-0 items-center gap-1.5 rounded-full border border-[var(--color-line)] bg-white px-3 py-1.5 text-xs font-semibold text-[var(--color-ink)] transition hover:border-[var(--color-yellow)] hover:bg-[#fff9db]"
+                >
+                  <FileText size={14} aria-hidden />
+                  Ver brochure
+                </a>
               </li>
             )
           })}
