@@ -8,6 +8,7 @@ from app.api.deps import get_voice_orchestration_service
 from app.schemas.realtime import (
     VoiceAnswerRequest,
     VoiceAnswerResponse,
+    VoiceCompleteRequest,
     VoiceCompleteResponse,
     VoiceContextResponse,
     VoiceEngagementRequest,
@@ -63,6 +64,7 @@ def report_voice_engagement(
 )
 def complete_voice_profile(
     lead_id: UUID,
+    payload: VoiceCompleteRequest | None = None,
     service: VoiceOrchestrationService = Depends(get_voice_orchestration_service),
 ) -> VoiceCompleteResponse:
-    return service.complete(lead_id)
+    return service.complete(lead_id, payload)

@@ -47,6 +47,17 @@ class LeadService:
     def list_leads(self) -> list[Lead]:
         return self._repository.list_all()
 
+    def list_advisor_queue(self) -> list[Lead]:
+        """Return compact evaluated leads for the advisor dashboard queue."""
+        list_fn = getattr(self._repository, "list_advisor_queue", None)
+        if callable(list_fn):
+            return [Lead.model_validate(item) for item in list_fn()]
+        return [
+            lead
+            for lead in self._repository.list_all()
+            if lead.affinity_percent is not None or lead.affinity_band is not None
+        ]
+
     def get_lead(self, lead_id: UUID) -> Lead:
         lead = self._repository.get_by_id(lead_id)
         if lead is None:
@@ -126,10 +137,19 @@ class LeadService:
         self._repository.update(updated)
         return ReadinessResponse.model_validate(result.model_dump())
 
-    def summary(self, lead_id: UUID) -> AdvisorSummaryResponse:
+    def summary(
+        self,
+        lead_id: UUID,
+        *,
+        include_recommendations: bool = True,
+    ) -> AdvisorSummaryResponse:
         lead = self.get_lead(lead_id)
         readiness = self._readiness.evaluate(lead)
-        return self._summary.build_summary(lead, readiness)
+        return self._summary.build_summary(
+            lead,
+            readiness,
+            include_recommendations=include_recommendations,
+        )
 
     def _enrich_category(self, lead: Lead) -> Lead:
         category = self._safe_category(lead)

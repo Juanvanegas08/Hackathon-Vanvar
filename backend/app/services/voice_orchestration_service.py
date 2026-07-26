@@ -23,6 +23,7 @@ from app.schemas.evaluation import NextQuestion
 from app.schemas.realtime import (
     VoiceAnswerRequest,
     VoiceAnswerResponse,
+    VoiceCompleteRequest,
     VoiceCompleteResponse,
     VoiceContextResponse,
     VoiceEngagementRequest,
@@ -179,6 +180,42 @@ class VoiceOrchestrationService:
             ),
         )
 
+    def ensure_engagement(
+        self,
+        lead_id: UUID,
+        *,
+        label: str | None = None,
+        score: int | None = None,
+        reason: str | None = None,
+        fallback_label: str = "desconocido",
+        fallback_score: int = 50,
+        fallback_reason: str = (
+            "Cierre sin reporte explícito de predisposición; se registró por defecto."
+        ),
+        overwrite: bool = False,
+    ) -> VoiceEngagementResponse | None:
+        """Persist engagement at close. Uses provided values or a safe fallback."""
+        lead = self._leads.get_lead(lead_id)
+        if lead.engagement_label is not None and not overwrite and not label:
+            return None
+
+        resolved_label = (label or "").strip() or fallback_label
+        try:
+            EngagementLabel(resolved_label)
+        except ValueError:
+            resolved_label = fallback_label
+
+        resolved_score = score if isinstance(score, int) else fallback_score
+        resolved_reason = (reason or "").strip() or fallback_reason
+        return self.report_engagement(
+            lead_id,
+            VoiceEngagementRequest(
+                label=resolved_label,  # type: ignore[arg-type]
+                score=max(0, min(100, resolved_score)),
+                reason=resolved_reason,
+            ),
+        )
+
     def submit_answer(
         self,
         lead_id: UUID,
@@ -293,7 +330,11 @@ class VoiceOrchestrationService:
             warnings=[],
         )
 
-    def complete(self, lead_id: UUID) -> VoiceCompleteResponse:
+    def complete(
+        self,
+        lead_id: UUID,
+        payload: VoiceCompleteRequest | None = None,
+    ) -> VoiceCompleteResponse:
         lead = self._leads.get_lead(lead_id)
         next_response = self._questions.get_next_question(lead)
         if not next_response.completed:
@@ -301,6 +342,18 @@ class VoiceOrchestrationService:
                 "Aún faltan preguntas prioritarias por completar.",
                 code="profile_incomplete",
             )
+
+        engagement = self.ensure_engagement(
+            lead_id,
+            label=payload.engagement_label if payload else None,
+            score=payload.engagement_score if payload else None,
+            reason=payload.engagement_reason if payload else None,
+            fallback_reason=(
+                "Perfil cerrado sin predisposición explícita del agente; "
+                "se registró por defecto al completar."
+            ),
+            overwrite=bool(payload and payload.engagement_label),
+        )
 
         readiness = self._leads.evaluate(lead_id)
         recommendations = None
@@ -390,6 +443,7 @@ class VoiceOrchestrationService:
         except Exception:  # noqa: BLE001
             pass
 
+        refreshed = self._leads.get_lead(lead_id)
         return VoiceCompleteResponse(
             completed=True,
             readiness={
@@ -407,6 +461,25 @@ class VoiceOrchestrationService:
             recommended_projects=recommended_projects,
             profile_json_path=profile_json_path,
             engine=engine,
+            engagement_label=(
+                engagement.engagement_label
+                if engagement is not None
+                else (
+                    refreshed.engagement_label.value
+                    if refreshed.engagement_label is not None
+                    else None
+                )
+            ),
+            engagement_score=(
+                engagement.engagement_score
+                if engagement is not None
+                else refreshed.engagement_score
+            ),
+            engagement_reason=(
+                engagement.engagement_reason
+                if engagement is not None
+                else refreshed.engagement_reason
+            ),
         )
 
     def _apply_confirmation(

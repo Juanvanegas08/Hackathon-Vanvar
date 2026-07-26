@@ -519,6 +519,31 @@ export const buildCallInsights = (
     })
   }
 
+  if (lead.engagement_label) {
+    const engagementTitles: Record<string, string> = {
+      interesado: 'Interesado',
+      indeciso: 'Indeciso',
+      molesto: 'Molesto',
+      trolleando: 'Solo respondiendo por molestar',
+      ocupado: 'Ocupado / apurado',
+      desconocido: 'Sin clasificar',
+    }
+    const title = engagementTitles[lead.engagement_label] ?? lead.engagement_label
+    const score =
+      typeof lead.engagement_score === 'number' ? ` · ${lead.engagement_score}/100` : ''
+    const reason = lead.engagement_reason ? ` — ${lead.engagement_reason}` : ''
+    insights.push({
+      label: 'Predisposición (Laura)',
+      value: `${title}${score}${reason}`,
+      tone:
+        lead.engagement_label === 'interesado'
+          ? 'positive'
+          : lead.engagement_label === 'molesto' || lead.engagement_label === 'trolleando'
+            ? 'warning'
+            : 'neutral',
+    })
+  }
+
   const { percent, band } = resolveLeadAffinity(lead, topProject)
   insights.push({
     label: 'Afinidad vivienda',

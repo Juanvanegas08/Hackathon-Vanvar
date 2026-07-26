@@ -6,8 +6,8 @@ from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID, uuid4
 
-from sqlalchemy import select
-from sqlalchemy.orm import Session
+from sqlalchemy import and_, select
+from sqlalchemy.orm import Session, aliased
 
 from app.core.config import Settings, get_settings
 from app.core.exceptions import NotFoundError
@@ -22,11 +22,13 @@ from app.db.sync_engine import get_sync_session_factory, sync_session_scope
 from app.models.lead import DataSource, DocumentType, IdentityStatus, Lead
 from app.repositories.lead_mapping import (
     build_profile_columns,
+    db_status_to_domain,
     domain_lead_from_rows,
     domain_status_to_db,
     split_display_name,
 )
 from app.services.profile_persistence_service import ProfilePersistenceService
+from app.utils.commercial_affinity import parse_commercial_snapshot
 from app.utils.identity_hash import (
     candidate_identifier_hashes,
     hash_identifier,
@@ -61,8 +63,165 @@ class PostgresLeadRepository:
 
     def list_all(self) -> list[Lead]:
         with sync_session_scope(self._settings) as session:
-            rows = session.scalars(select(LeadRow).order_by(LeadRow.created_at.desc())).all()
-            return [self._to_domain(session, row) for row in rows]
+            PhoneContact = aliased(ContactPoint)
+            EmailContact = aliased(ContactPoint)
+
+            rows = session.execute(
+                select(
+                    LeadRow,
+                    Person,
+                    LeadProfile,
+                    PersonIdentifier,
+                    PhoneContact,
+                    EmailContact,
+                )
+                .outerjoin(Person, Person.id == LeadRow.person_id)
+                .outerjoin(LeadProfile, LeadProfile.lead_id == LeadRow.id)
+                .outerjoin(
+                    PersonIdentifier,
+                    and_(
+                        PersonIdentifier.person_id == LeadRow.person_id,
+                        PersonIdentifier.is_primary.is_(True),
+                    ),
+                )
+                .outerjoin(
+                    PhoneContact,
+                    and_(
+                        PhoneContact.person_id == LeadRow.person_id,
+                        PhoneContact.contact_type == "phone",
+                        PhoneContact.is_primary.is_(True),
+                    ),
+                )
+                .outerjoin(
+                    EmailContact,
+                    and_(
+                        EmailContact.person_id == LeadRow.person_id,
+                        EmailContact.contact_type == "email",
+                        EmailContact.is_primary.is_(True),
+                    ),
+                )
+                .order_by(LeadRow.created_at.desc())
+            ).all()
+
+            leads: list[Lead] = []
+            seen: set[UUID] = set()
+            for lead_row, person, profile, identifier, phone, email in rows:
+                if lead_row.id in seen:
+                    continue
+                seen.add(lead_row.id)
+                leads.append(
+                    self._to_domain_cached(
+                        lead_row=lead_row,
+                        person=person,
+                        profile=profile,
+                        identifier=identifier,
+                        phone=phone,
+                        email=email,
+                    )
+                )
+            return leads
+
+    def list_advisor_queue(self) -> list[dict[str, Any]]:
+        """Compact rows for the advisor queue (one SQL round-trip)."""
+        with sync_session_scope(self._settings) as session:
+            rows = session.execute(
+                select(
+                    LeadRow.id,
+                    LeadRow.status,
+                    Person.display_name,
+                    LeadProfile.affiliated,
+                    LeadProfile.affiliation_category,
+                    LeadProfile.additional_preferences,
+                    LeadProfile.profile_document,
+                    PersonIdentifier.identifier_type,
+                    PersonIdentifier.identifier_ciphertext,
+                )
+                .outerjoin(Person, Person.id == LeadRow.person_id)
+                .outerjoin(LeadProfile, LeadProfile.lead_id == LeadRow.id)
+                .outerjoin(
+                    PersonIdentifier,
+                    and_(
+                        PersonIdentifier.person_id == LeadRow.person_id,
+                        PersonIdentifier.is_primary.is_(True),
+                    ),
+                )
+                .order_by(LeadRow.created_at.desc())
+            ).all()
+
+            items: list[dict[str, Any]] = []
+            seen: set[UUID] = set()
+            for (
+                lead_id,
+                status,
+                display_name,
+                affiliated,
+                affiliation_category,
+                extras,
+                document,
+                identifier_type,
+                identifier_ciphertext,
+            ) in rows:
+                if lead_id in seen:
+                    continue
+                seen.add(lead_id)
+
+                extras = extras if isinstance(extras, dict) else {}
+                document = document if isinstance(document, dict) else {}
+                contact = document.get("contact") if isinstance(document.get("contact"), dict) else {}
+                identity = document.get("identity") if isinstance(document.get("identity"), dict) else {}
+                affiliation = (
+                    document.get("affiliation")
+                    if isinstance(document.get("affiliation"), dict)
+                    else {}
+                )
+                commercial_raw = None
+                if isinstance(document.get("commercial"), dict):
+                    commercial_raw = document.get("commercial")
+                elif isinstance(extras.get("commercial"), dict):
+                    commercial_raw = extras.get("commercial")
+                commercial = parse_commercial_snapshot(commercial_raw) or {}
+
+                if (
+                    commercial.get("affinity_percent") is None
+                    and not commercial.get("affinity_band")
+                ):
+                    continue
+
+                afiliado = affiliation.get("afiliado")
+                if afiliado is None:
+                    afiliado = affiliated
+
+                categoria = affiliation.get("categoria_afiliacion") or affiliation_category
+                doc_type = identity.get("document_type") or identifier_type
+                doc_number = identity.get("document_number") or (
+                    normalize_document_number(identifier_ciphertext)
+                    if identifier_ciphertext
+                    else None
+                )
+
+                items.append(
+                    {
+                        "id": lead_id,
+                        "nombre": contact.get("nombre") or display_name,
+                        "document_type": doc_type,
+                        "document_number": doc_number,
+                        "afiliado": afiliado,
+                        "categoria_afiliacion": categoria,
+                        "afiliacion_confirmada": bool(
+                            affiliation.get("afiliacion_confirmada", False)
+                        ),
+                        "canal_origen": contact.get("canal_origen")
+                        or extras.get("canal_origen")
+                        or "desconocido",
+                        "affinity_percent": commercial.get("affinity_percent"),
+                        "affinity_band": commercial.get("affinity_band"),
+                        "top_project_id": commercial.get("top_project_id"),
+                        "top_project_name": commercial.get("top_project_name"),
+                        "estado_lead": db_status_to_domain(status).value,
+                        "status": db_status_to_domain(status).value,
+                    }
+                )
+            return items
 
     def update(self, lead: Lead) -> Lead:
         with sync_session_scope(self._settings) as session:
@@ -573,6 +732,29 @@ class PostgresLeadRepository:
                 ContactPoint.is_primary.is_(True),
             )
         )
+        return self._to_domain_cached(
+            lead_row=lead_row,
+            person=person,
+            profile=profile,
+            identifier=identifier,
+            phone=phone,
+            email=email,
+            document_type=document_type,
+            document_number=document_number,
+        )
+
+    def _to_domain_cached(
+        self,
+        *,
+        lead_row: LeadRow,
+        person: Person | None,
+        profile: LeadProfile | None,
+        identifier: PersonIdentifier | None,
+        phone: ContactPoint | None,
+        email: ContactPoint | None,
+        document_type: str | None = None,
+        document_number: str | None = None,
+    ) -> Lead:
         phone_value = self._contact_raw_value(phone)
         email_value = self._contact_raw_value(email)
         return domain_lead_from_rows(

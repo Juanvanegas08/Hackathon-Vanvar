@@ -1,8 +1,9 @@
 import { useQuery } from '@tanstack/react-query'
 import { useEffect } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
-import { getLead, getSummary, listLeads } from '@/api/leads.api'
+import { getLead, getSummary, listAdvisorQueue } from '@/api/leads.api'
 import { getRecommendations } from '@/api/recommendations.api'
+import type { ProjectRecommendation, RecommendationResponse } from '@/api/types'
 import { AdvisorLeadQueue } from '@/components/advisor/AdvisorLeadQueue'
 import { AdvisorRecommendationsPanel } from '@/components/advisor/AdvisorRecommendationsPanel'
 import { BuyerPersonaCard } from '@/components/advisor/BuyerPersonaCard'
@@ -26,32 +27,38 @@ import {
   briefingEyebrow,
   buildBuyerPersona,
   buildCallInsights,
-  buildClosingPlaybook,
   resolveLeadAffinity,
 } from '@/utils/advisorBriefing'
+
+const stubTopProject = (
+  lead: {
+    top_project_id?: string | null
+    top_project_name?: string | null
+    affinity_percent?: number | null
+  } | null | undefined,
+): ProjectRecommendation | null => {
+  if (!lead?.top_project_id && !lead?.top_project_name) return null
+  return {
+    project_id: lead.top_project_id ?? 'pending',
+    project_name: lead.top_project_name ?? 'Proyecto sugerido',
+    canonical_project_id: lead.top_project_id ?? 'pending',
+    rank: 1,
+    compatibility_score: Number(lead.affinity_percent ?? 0),
+    confidence: 'medium',
+  }
+}
 
 export const AdvisorPage = () => {
   const [params, setParams] = useSearchParams()
   const selectedId = params.get('lead')
   const mockMode = isAdvisorMockEnabled(params.get('mock'))
 
-  const setMockMode = (enabled: boolean) => {
-    const next = new URLSearchParams(params)
-    if (enabled) {
-      next.set('mock', '1')
-      if (!next.get('lead')) next.set('lead', 'mock-lead-laura')
-    } else {
-      // mock=0 overrides VITE_ADVISOR_MOCK so puedes volver a API real
-      next.set('mock', '0')
-      if (next.get('lead')?.startsWith('mock-')) next.delete('lead')
-    }
-    setParams(next)
-  }
-
   const leadsQuery = useQuery({
-    queryKey: ['leads', mockMode ? 'mock' : 'live'],
-    queryFn: mockMode ? listMockAdvisorLeads : listLeads,
+    queryKey: ['leads', mockMode ? 'mock' : 'advisor-queue'],
+    queryFn: mockMode ? listMockAdvisorLeads : listAdvisorQueue,
     refetchInterval: mockMode ? false : 15_000,
+    staleTime: 10_000,
+    placeholderData: (previous) => previous,
   })
 
   useEffect(() => {
@@ -62,33 +69,69 @@ export const AdvisorPage = () => {
     setParams(next, { replace: true })
   }, [mockMode, selectedId, leadsQuery.data, params, setParams])
 
-  const detailQuery = useQuery({
-    queryKey: ['advisor-detail', mockMode ? 'mock' : 'live', selectedId],
+  const mockDetailQuery = useQuery({
+    queryKey: ['advisor-detail', 'mock', selectedId],
     queryFn: async () => {
       if (!selectedId) return null
-      if (mockMode) return getMockAdvisorDetail(selectedId)
-      const [lead, summary, recommendations] = await Promise.all([
-        getLead(selectedId),
-        getSummary(selectedId),
-        getRecommendations(selectedId, { limit: 3 }),
-      ])
-      return { lead, summary, recommendations }
+      return getMockAdvisorDetail(selectedId)
     },
-    enabled: Boolean(selectedId),
+    enabled: Boolean(selectedId) && mockMode,
   })
 
-  const detail = detailQuery.data
-  const topProject = detail?.recommendations.recommended_projects[0] ?? null
-  const persona = detail
-    ? buildBuyerPersona(detail.lead, detail.summary, topProject)
-    : null
-  const insights = detail
-    ? buildCallInsights(detail.lead, detail.summary, topProject)
-    : []
-  const playbook = detail
-    ? buildClosingPlaybook(detail.lead, detail.summary, topProject)
-    : []
-  const affinity = detail ? resolveLeadAffinity(detail.lead, topProject) : null
+  const leadQuery = useQuery({
+    queryKey: ['advisor-lead', selectedId],
+    queryFn: () => getLead(selectedId!),
+    enabled: Boolean(selectedId) && !mockMode,
+    staleTime: 30_000,
+  })
+
+  const summaryQuery = useQuery({
+    queryKey: ['advisor-summary', selectedId],
+    queryFn: () => getSummary(selectedId!, { includeRecommendations: false }),
+    enabled: Boolean(selectedId) && !mockMode,
+    staleTime: 30_000,
+  })
+
+  const recommendationsQuery = useQuery({
+    queryKey: ['advisor-recommendations', selectedId],
+    queryFn: () =>
+      getRecommendations(selectedId!, {
+        limit: 3,
+        // Dashboard del asesor: motor local para respuesta inmediata.
+        preferOpenai: false,
+      }),
+    enabled: Boolean(selectedId) && !mockMode,
+    staleTime: 60_000,
+  })
+
+  const lead = mockMode ? mockDetailQuery.data?.lead : leadQuery.data
+  const summary = mockMode ? mockDetailQuery.data?.summary : summaryQuery.data
+  const recommendations: RecommendationResponse | null | undefined = mockMode
+    ? mockDetailQuery.data?.recommendations
+    : recommendationsQuery.data
+
+  const topProject =
+    recommendations?.recommended_projects[0] ?? stubTopProject(lead) ?? null
+  const persona = lead && summary ? buildBuyerPersona(lead, summary, topProject) : null
+  const insights =
+    lead && summary ? buildCallInsights(lead, summary, topProject) : []
+  const affinity = lead ? resolveLeadAffinity(lead, topProject) : null
+
+  const detailLoading = mockMode
+    ? mockDetailQuery.isLoading
+    : Boolean(selectedId) && leadQuery.isLoading
+  const detailError = mockMode
+    ? mockDetailQuery.isError
+    : leadQuery.isError || summaryQuery.isError
+  const retryDetail = () => {
+    if (mockMode) {
+      void mockDetailQuery.refetch()
+      return
+    }
+    void leadQuery.refetch()
+    void summaryQuery.refetch()
+    void recommendationsQuery.refetch()
+  }
 
   return (
     <AppShell>
@@ -99,53 +142,41 @@ export const AdvisorPage = () => {
               Orquestador comercial
             </p>
             <h1 className="mt-2 font-display text-4xl md:text-5xl">
-              Dashboard del asesor humano
+              Briefing comercial
             </h1>
             <p className="mt-3 max-w-2xl text-[var(--color-muted)]">
               Después de la llamada, aquí tienes el briefing completo: quién es el cliente,
               qué se identificó, qué ofrecerle y cómo cerrar la venta.
             </p>
           </div>
-          <div className="flex flex-wrap gap-2">
-            <Button
-              variant={mockMode ? 'primary' : 'secondary'}
-              onClick={() => setMockMode(!mockMode)}
-            >
-              {mockMode ? 'Datos demo (sin backend)' : 'Ver sin backend'}
+          {!mockMode && (
+            <Button variant="ghost" onClick={() => void leadsQuery.refetch()}>
+              Actualizar cola
             </Button>
-            <Link to="/demo">
-              <Button variant="secondary">Modo demo</Button>
-            </Link>
-            {!mockMode && (
-              <Button variant="ghost" onClick={() => void leadsQuery.refetch()}>
-                Actualizar cola
-              </Button>
-            )}
-          </div>
+          )}
         </div>
 
-        {mockMode && (
-          <div className="mt-6 rounded-2xl border border-[var(--color-yellow)] bg-[#fff9db] px-4 py-3 text-sm text-[var(--color-ink)]">
-            Estás viendo la vista con <strong>datos de demostración</strong>. No se llama al
-            backend. Para volver a datos reales, desactiva “Datos demo” o quita{' '}
-            <code className="rounded bg-white/80 px-1">?mock=1</code> de la URL.
-          </div>
-        )}
-
-        {leadsQuery.isLoading && (
-          <div className="mt-10">
-            <Spinner label="Cargando cola comercial" />
+        {leadsQuery.isLoading && !leadsQuery.data && (
+          <div className="mt-8 grid gap-6 lg:grid-cols-[280px_minmax(0,1fr)]">
+            <aside className="rounded-[1.75rem] border border-[var(--color-line)] bg-white p-4 surface-shadow">
+              <div className="mb-4 flex items-center justify-between gap-2">
+                <h2 className="font-display text-xl">Cola de leads</h2>
+              </div>
+              <Spinner label="Cargando cola" />
+            </aside>
+            <div className="rounded-[1.75rem] border border-dashed border-[var(--color-line)] bg-white/70 p-10 text-center">
+              <p className="text-sm text-[var(--color-muted)]">
+                Preparando el briefing…
+              </p>
+            </div>
           </div>
         )}
         {leadsQuery.isError && !mockMode && (
-          <div className="mt-10 space-y-4">
+          <div className="mt-10">
             <ErrorState
               message="No pudimos conectar con el servicio. Revisa que el backend esté en ejecución."
               onRetry={() => void leadsQuery.refetch()}
             />
-            <div className="text-center">
-              <Button onClick={() => setMockMode(true)}>Abrir vista con datos demo</Button>
-            </div>
           </div>
         )}
 
@@ -172,20 +203,20 @@ export const AdvisorPage = () => {
                 </div>
               )}
 
-              {selectedId && detailQuery.isLoading && (
+              {selectedId && detailLoading && (
                 <div className="rounded-[1.75rem] bg-white p-10">
                   <Spinner label="Preparando briefing del asesor" />
                 </div>
               )}
 
-              {selectedId && detailQuery.isError && (
+              {selectedId && detailError && !lead && (
                 <ErrorState
                   message="No pudimos cargar el detalle del lead."
-                  onRetry={() => void detailQuery.refetch()}
+                  onRetry={retryDetail}
                 />
               )}
 
-              {detail && persona && (
+              {lead && (
                 <div className="space-y-6">
                   <header className="rounded-[1.75rem] border border-[var(--color-yellow)]/50 bg-gradient-to-br from-[#fff9db] via-white to-[#f4f7fb] p-6 surface-shadow">
                     <div className="flex flex-wrap items-start justify-between gap-4">
@@ -194,26 +225,28 @@ export const AdvisorPage = () => {
                           {briefingEyebrow(affinity?.band)}
                         </p>
                         <h2 className="mt-2 font-display text-3xl md:text-4xl">
-                          {detail.lead.nombre ?? 'Lead sin nombre'}
+                          {lead.nombre ?? 'Lead sin nombre'}
                         </h2>
                         <p className="mt-2 text-lg text-[var(--color-ink)]">
-                          {detail.summary.headline}
+                          {summary?.headline ?? 'Cargando resumen del perfil…'}
                         </p>
-                        <p className="mt-3 max-w-2xl text-sm text-[var(--color-muted)]">
-                          {detail.summary.disclaimer}
-                        </p>
+                        {summary?.disclaimer && (
+                          <p className="mt-3 max-w-2xl text-sm text-[var(--color-muted)]">
+                            {summary.disclaimer}
+                          </p>
+                        )}
                       </div>
                       <div className="flex flex-wrap gap-2">
                         <Badge
                           className={
-                            detail.lead.afiliado === true
+                            lead.afiliado === true
                               ? 'bg-[var(--color-green)]'
-                              : detail.lead.afiliado === false
+                              : lead.afiliado === false
                                 ? 'bg-[var(--color-muted)]'
                                 : 'bg-[var(--color-blue)]'
                           }
                         >
-                          {affiliationLabel(detail.lead)}
+                          {affiliationLabel(lead)}
                         </Badge>
                         <Badge className="bg-[var(--color-blue)]">
                           {affinity?.percent != null
@@ -238,23 +271,41 @@ export const AdvisorPage = () => {
                     )}
                   </header>
 
-                  <div className="grid gap-6 xl:grid-cols-2">
-                    <BuyerPersonaCard persona={persona} />
-                    <CallInsightsCard insights={insights} />
-                  </div>
+                  {!summary && summaryQuery.isLoading && (
+                    <div className="rounded-[1.75rem] bg-white p-6">
+                      <Spinner label="Cargando hallazgos de la llamada" />
+                    </div>
+                  )}
 
-                  <ClosingPlaybookCard
-                    steps={playbook}
-                    talkTracks={persona.talkTracks}
-                    objections={persona.objections}
-                  />
+                  {persona && summary && (
+                    <>
+                      <div className="grid gap-6 xl:grid-cols-2">
+                        <BuyerPersonaCard persona={persona} />
+                        <CallInsightsCard insights={insights} />
+                      </div>
 
-                  <ClientProfilePanel lead={detail.lead} summary={detail.summary} />
+                      <ClosingPlaybookCard lead={lead} />
 
-                  <AdvisorRecommendationsPanel
-                    recommendations={detail.recommendations}
-                    warning={detail.summary.recommendation_warning}
-                  />
+                      <ClientProfilePanel lead={lead} summary={summary} />
+                    </>
+                  )}
+
+                  {recommendationsQuery.isLoading && !recommendations && (
+                    <div className="rounded-[1.75rem] bg-white p-6">
+                      <Spinner label="Cargando proyectos recomendados" />
+                    </div>
+                  )}
+
+                  {(recommendations || recommendationsQuery.isError) && (
+                    <AdvisorRecommendationsPanel
+                      recommendations={recommendations ?? null}
+                      warning={
+                        recommendationsQuery.isError
+                          ? 'No pudimos cargar recomendaciones ahora. El resto del briefing ya está listo.'
+                          : summary?.recommendation_warning
+                      }
+                    />
+                  )}
                 </div>
               )}
             </div>

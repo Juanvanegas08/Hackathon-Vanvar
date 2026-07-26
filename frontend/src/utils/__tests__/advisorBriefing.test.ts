@@ -105,16 +105,26 @@ describe('advisorBriefing', () => {
   })
 
   it('surfaces call insights and closing steps', () => {
-    const insights = buildCallInsights(leadBase, summaryBase, {
-      project_id: 'p1',
-      project_name: 'Monguí',
-      canonical_project_id: 'mongui',
-      rank: 1,
-      compatibility_score: 88,
-      confidence: 'high',
-    })
+    const insights = buildCallInsights(
+      {
+        ...leadBase,
+        engagement_label: 'interesado',
+        engagement_score: 90,
+        engagement_reason: 'Muy colaborador',
+      },
+      summaryBase,
+      {
+        project_id: 'p1',
+        project_name: 'Monguí',
+        canonical_project_id: 'mongui',
+        rank: 1,
+        compatibility_score: 88,
+        confidence: 'high',
+      },
+    )
     expect(insights.some((item) => item.label === 'Identidad')).toBe(true)
     expect(insights.some((item) => item.label === 'Interés declarado')).toBe(true)
+    expect(insights.some((item) => item.label === 'Predisposición (Laura)')).toBe(true)
     expect(insights.some((item) => item.label === 'Afinidad vivienda')).toBe(true)
     expect(resolveLeadAffinity(leadBase, {
       project_id: 'p1',

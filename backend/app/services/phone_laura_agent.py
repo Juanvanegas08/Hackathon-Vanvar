@@ -16,7 +16,11 @@ from uuid import UUID
 from app.core.config import Settings, get_settings
 from app.core.exceptions import ConfigurationError, NotFoundError, ValidationBusinessError
 from app.models.lead import CanalOrigen, Lead
-from app.schemas.realtime import VoiceAnswerRequest, VoiceEngagementRequest
+from app.schemas.realtime import (
+    VoiceAnswerRequest,
+    VoiceCompleteRequest,
+    VoiceEngagementRequest,
+)
 from app.services.identity_service import IdentityService
 from app.services.laura_agent_instructions import (
     KICKOFF_USER_MESSAGE,
@@ -229,10 +233,29 @@ def _tool_complete_profile() -> dict[str, Any]:
         "name": "complete_voice_profile",
         "description": (
             "Finaliza el perfilamiento cuando no queden preguntas y prepara "
-            "resultados. Puede tardar. No llames tools extras antes; habla solo "
-            "cuando tengas el resultado."
+            "resultados. OBLIGATORIO: incluye engagement_label/score/reason del "
+            "tono de la persona. Puede tardar. No llames tools extras antes; "
+            "habla solo cuando tengas el resultado."
         ),
-        "parameters": {"type": "object", "properties": {}, "required": []},
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "engagement_label": {
+                    "type": "string",
+                    "enum": [
+                        "interesado",
+                        "indeciso",
+                        "molesto",
+                        "trolleando",
+                        "ocupado",
+                        "desconocido",
+                    ],
+                },
+                "engagement_score": {"type": ["number", "null"]},
+                "engagement_reason": {"type": ["string", "null"]},
+            },
+            "required": ["engagement_label"],
+        },
     }
 
 
@@ -265,7 +288,9 @@ def _tool_end_call() -> dict[str, Any]:
         "name": "end_call",
         "description": (
             "Termina la llamada después de despedirte. Úsala si el usuario pide "
-            "llamar más tarde, está ocupado, no quiere seguir, o se despide."
+            "llamar más tarde, está ocupado, no quiere seguir, o se despide. "
+            "OBLIGATORIO: registra engagement_label (si no lo das, el backend "
+            "lo infiere del reason)."
         ),
         "parameters": {
             "type": "object",
@@ -276,6 +301,19 @@ def _tool_end_call() -> dict[str, Any]:
                 },
                 "spoken_goodbye": {"type": "string"},
                 "callback_note": {"type": "string"},
+                "engagement_label": {
+                    "type": "string",
+                    "enum": [
+                        "interesado",
+                        "indeciso",
+                        "molesto",
+                        "trolleando",
+                        "ocupado",
+                        "desconocido",
+                    ],
+                },
+                "engagement_score": {"type": ["number", "null"]},
+                "engagement_reason": {"type": ["string", "null"]},
             },
             "required": ["reason"],
         },
@@ -475,7 +513,7 @@ class PhoneLauraAgent:
             if name == "report_user_engagement":
                 return self._tool_report_engagement(args)
             if name == "complete_voice_profile":
-                return self._tool_complete()
+                return self._tool_complete(args)
             if name == "resolve_identity":
                 return self._tool_resolve_identity(args)
             if name == "end_call":
@@ -629,10 +667,22 @@ class PhoneLauraAgent:
         )
         return result.model_dump(mode="json")
 
-    def _tool_complete(self) -> dict[str, Any]:
+    def _tool_complete(self, args: dict[str, Any] | None = None) -> dict[str, Any]:
         lead_id = self._require_lead_id()
+        args = args or {}
+        score = args.get("engagement_score")
+        score_int = int(score) if isinstance(score, (int, float)) else None
+        complete_payload = VoiceCompleteRequest(
+            engagement_label=args.get("engagement_label"),  # type: ignore[arg-type]
+            engagement_score=score_int,
+            engagement_reason=(
+                str(args["engagement_reason"])
+                if args.get("engagement_reason") is not None
+                else None
+            ),
+        )
         try:
-            result = self._voice.complete(lead_id)
+            result = self._voice.complete(lead_id, complete_payload)
             payload = result.model_dump(mode="json")
             if payload.get("completed"):
                 payload["speak_now"] = (
@@ -649,6 +699,9 @@ class PhoneLauraAgent:
                 "top_project": payload.get("top_project"),
                 "recommended_projects": payload.get("recommended_projects"),
                 "disclaimer": payload.get("disclaimer"),
+                "engagement_label": payload.get("engagement_label"),
+                "engagement_score": payload.get("engagement_score"),
+                "engagement_reason": payload.get("engagement_reason"),
                 "speak_now": payload.get("speak_now"),
             }
         except Exception as exc:  # noqa: BLE001
@@ -723,6 +776,37 @@ class PhoneLauraAgent:
                 goodbye = "Listo, no te preocupes. Hablamos después."
             else:
                 goodbye = "Listo, perfecto. Chao, que estés bien."
+
+        engagement_label = args.get("engagement_label")
+        engagement_score = args.get("engagement_score")
+        engagement_reason = args.get("engagement_reason")
+        score_int = (
+            int(engagement_score)
+            if isinstance(engagement_score, (int, float))
+            else None
+        )
+        fallback_label, fallback_score, fallback_reason = _end_call_engagement_fallback(
+            reason
+        )
+        if self.lead_id is not None:
+            try:
+                self._voice.ensure_engagement(
+                    self.lead_id,
+                    label=str(engagement_label) if engagement_label else None,
+                    score=score_int,
+                    reason=(
+                        str(engagement_reason)
+                        if engagement_reason is not None
+                        else None
+                    ),
+                    fallback_label=fallback_label,
+                    fallback_score=fallback_score,
+                    fallback_reason=fallback_reason,
+                    overwrite=True,
+                )
+            except Exception:  # noqa: BLE001
+                logger.exception("Failed to persist engagement on end_call")
+
         self.end_call_requested = True
         self.end_call_reason = reason
         return {
@@ -730,8 +814,35 @@ class PhoneLauraAgent:
             "reason": reason,
             "spoken_goodbye": goodbye,
             "callback_note": callback_note or None,
+            "engagement_label": engagement_label or fallback_label,
             "ok": True,
         }
+
+
+def _end_call_engagement_fallback(reason: str) -> tuple[str, int, str]:
+    if reason == "busy":
+        return (
+            "ocupado",
+            40,
+            "Usuario ocupado; se cortó la llamada a petición suya.",
+        )
+    if reason == "callback_later":
+        return (
+            "ocupado",
+            45,
+            "Usuario pidió callback más tarde.",
+        )
+    if reason == "goodbye":
+        return (
+            "interesado",
+            65,
+            "Cierre normal de la llamada al despedirse.",
+        )
+    return (
+        "desconocido",
+        50,
+        "Llamada terminada sin predisposición explícita.",
+    )
 
 
 def find_lead_by_phone(lead_service: LeadService, phone: str) -> Lead | None:

@@ -81,7 +81,7 @@ Reglas operativas:
 5. El backend es la única fuente de verdad.
 6. Al inicio: saludo humano + marco 2–3 min + si ahora o más tarde (usa opening_hint si viene). SIN tools primero si ya tienes contexto.
 7. Tras submit_current_answer accepted=true: usa next_question del resultado. NO get_voice_context.
-8. report_user_engagement: casi nunca. Solo 1 vez al cierre o si el tono cambia de forma extrema.
+8. Predisposición: no uses report_user_engagement entre turnos. Al cerrar es OBLIGATORIO: pásala en complete_voice_profile (engagement_label/score/reason).
 9. submit_current_answer SOLO si es RESPUESTA real. Enums: situacion_crediticia (sin_reportes, al_dia, atrasos_menores, atrasos_mayores, en_proceso_normalizacion, desconocida); plazo_compra (inmediato, 3_meses, 6_meses, 12_meses, mas_de_un_ano, no_definido). proyecto_interes opcional: "lo que me recomiendes"/skip → normalizedValue="sin preferencia".
 10. No afirmes que guardaste hasta accepted=true (y ni así lo digas en voz).
 11. Si rechazan por duda: responde corto; luego retoma. Si inválida: repregunta en una frase. Sin menús.
@@ -92,7 +92,7 @@ Reglas operativas:
 16. No menciones IDs, JSON, tools ni detalles técnicos.
 17. Si pregunta, contéstale breve antes de seguir el perfil.
 18. Si no entiende, reformúlala más corta con un ejemplo distinto.
-19. Perfil completo → complete_voice_profile y LEE SOLO assistant_closing/spoken_summary. No inventes opciones extra ni menús al final.
+19. Perfil completo → complete_voice_profile CON engagement_label (interesado/indeciso/molesto/trolleando/ocupado/desconocido), score 0–100 y reason breve. Luego LEE SOLO assistant_closing/spoken_summary.
 20. Después del cierre, no más preguntas de perfil.
 21. Preséntate como Laura (Colsubsidio). CasaLista es la plataforma, no tu nombre.
 22. Si complete_voice_profile falla: silencio o "ya casi"; reintenta UNA vez.
@@ -413,11 +413,26 @@ export const createCasaListaRealtimeAgent = (options: CasaListaAgentOptions) => 
   const complete_voice_profile = tool({
     name: 'complete_voice_profile',
     description:
-      'Finaliza el perfilamiento cuando next_question sea null / profile_completed=true. Puede tardar. Quédate en silencio hasta el resultado; no digas "un segundo".',
-    parameters: z.object({}),
-    execute: async () => {
+      'Finaliza el perfilamiento cuando next_question sea null / profile_completed=true. OBLIGATORIO: incluye engagement_label, score y reason del tono. Puede tardar. Quédate en silencio hasta el resultado; no digas "un segundo".',
+    parameters: z.object({
+      engagement_label: z.enum([
+        'interesado',
+        'indeciso',
+        'molesto',
+        'trolleando',
+        'ocupado',
+        'desconocido',
+      ]),
+      engagement_score: z.number().min(0).max(100).nullable(),
+      engagement_reason: z.string().nullable(),
+    }),
+    execute: async ({ engagement_label, engagement_score, engagement_reason }) => {
       try {
-        const result = await completeVoiceProfile(leadId)
+        const result = await completeVoiceProfile(leadId, {
+          engagement_label,
+          engagement_score,
+          engagement_reason,
+        })
         if (result.completed) {
           window.setTimeout(() => {
             onProfileCompleted?.(result.navigation_path)
@@ -432,6 +447,9 @@ export const createCasaListaRealtimeAgent = (options: CasaListaAgentOptions) => 
           top_project: result.top_project,
           recommended_projects: result.recommended_projects,
           disclaimer: result.disclaimer,
+          engagement_label: result.engagement_label,
+          engagement_score: result.engagement_score,
+          engagement_reason: result.engagement_reason,
           speak_now:
             'LEE EN VOZ ALTA SOLO el assistant_closing o spoken_summary. ' +
             'No inventes menús (continuar/editar/cancelar). No agregues preguntas nuevas.',
@@ -464,7 +482,7 @@ export const createCasaListaRealtimeAgent = (options: CasaListaAgentOptions) => 
         : 'Al iniciar, si no tienes contexto, llama get_voice_context una vez antes de saludar.',
       'Corto y sencillo: tras cada respuesta, solo la siguiente pregunta (≤12 palabras). Sin meta-habla ni menús.',
       'Tras submit_current_answer accepted=true, di solo next_question al instante. Sin tools extras.',
-      'Cuando complete_voice_profile responda completed=true: LEE SOLO assistant_closing/spoken_summary. Sin inventar opciones.',
+      'Cuando complete_voice_profile responda completed=true: LEE SOLO assistant_closing/spoken_summary. Sin inventar opciones. Siempre incluye engagement_label al llamar complete.',
     ]
       .filter(Boolean)
       .join('\n'),

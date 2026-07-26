@@ -56,6 +56,24 @@ class VoiceAnswerResponse(BaseModel):
     warnings: list[str] = Field(default_factory=list)
 
 
+class VoiceCompleteRequest(BaseModel):
+    """Optional engagement snapshot to persist when closing the voice profile."""
+
+    engagement_label: (
+        Literal[
+            "interesado",
+            "indeciso",
+            "molesto",
+            "trolleando",
+            "ocupado",
+            "desconocido",
+        ]
+        | None
+    ) = None
+    engagement_score: int | None = Field(default=None, ge=0, le=100)
+    engagement_reason: str | None = Field(default=None, max_length=400)
+
+
 class VoiceCompleteResponse(BaseModel):
     completed: bool
     readiness: dict[str, Any]
@@ -69,6 +87,9 @@ class VoiceCompleteResponse(BaseModel):
     recommended_projects: list[dict[str, Any]] = Field(default_factory=list)
     profile_json_path: str | None = None
     engine: str | None = None
+    engagement_label: str | None = None
+    engagement_score: int | None = None
+    engagement_reason: str | None = None
 
 
 class VoiceEngagementRequest(BaseModel):

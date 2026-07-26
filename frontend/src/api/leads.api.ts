@@ -5,13 +5,21 @@ const prefix = '/api/v1/leads'
 export const createLead = async (payload: LeadUpdate) => (await apiClient.post<LeadResponse>(prefix, payload)).data
 export const getLead = async (leadId: string) => (await apiClient.get<LeadResponse>(`${prefix}/${leadId}`)).data
 export const listLeads = async () => (await apiClient.get<LeadResponse[]>(prefix)).data
+export const listAdvisorQueue = async () =>
+  (await apiClient.get<LeadResponse[]>(`${prefix}/advisor-queue`)).data
 export const updateLead = async (leadId: string, payload: LeadUpdate) => (await apiClient.patch<LeadResponse>(`${prefix}/${leadId}`, payload)).data
 export const getNextQuestion = async (leadId: string) => (await apiClient.get<NextQuestionResponse>(`${prefix}/${leadId}/next-question`)).data
 export const evaluateLead = async (leadId: string) => (await apiClient.post<ReadinessResponse>(`${prefix}/${leadId}/evaluate`)).data
-export const getSummary = async (leadId: string) =>
+export const getSummary = async (
+  leadId: string,
+  options?: { includeRecommendations?: boolean },
+) =>
   (
     await apiClient.get<AdvisorSummaryResponse>(`${prefix}/${leadId}/summary`, {
-      // Summary también invoca el recomendador OpenAI.
-      timeout: 90_000,
+      params: {
+        include_recommendations: options?.includeRecommendations ?? true,
+      },
+      // Solo aplica timeout largo cuando el summary también genera recomendaciones.
+      timeout: options?.includeRecommendations === false ? 15_000 : 90_000,
     })
   ).data

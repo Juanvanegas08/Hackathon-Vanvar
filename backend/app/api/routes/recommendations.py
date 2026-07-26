@@ -35,6 +35,13 @@ def recommend_projects_for_lead(
         le=100,
         description="Puntaje mínimo de compatibilidad",
     ),
+    prefer_openai: bool | None = Query(
+        default=None,
+        description=(
+            "Si es false, usa el motor determinístico (más rápido). "
+            "Si es null, respeta la configuración del servidor."
+        ),
+    ),
     lead_service: LeadService = Depends(get_lead_service),
     recommendation_service: RecommendationService = Depends(get_recommendation_service),
 ) -> RecommendationResponse:
@@ -44,6 +51,7 @@ def recommend_projects_for_lead(
         limit=limit,
         include_unavailable=include_unavailable,
         min_score=min_score,
+        prefer_openai=prefer_openai,
     )
     if result.recommended_projects:
         try:

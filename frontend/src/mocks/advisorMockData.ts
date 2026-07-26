@@ -46,6 +46,9 @@ export const MOCK_ADVISOR_LEADS: LeadResponse[] = [
     affinity_band: 'listo',
     top_project_id: 'mongui',
     top_project_name: 'Monguí',
+    engagement_label: 'interesado',
+    engagement_score: 88,
+    engagement_reason: 'Colaboró con las preguntas y pidió opciones concretas',
   },
   {
     id: 'mock-lead-andres',
@@ -84,6 +87,9 @@ export const MOCK_ADVISOR_LEADS: LeadResponse[] = [
     affinity_band: 'por_evaluar',
     top_project_id: 'bosques-cajica',
     top_project_name: 'Bosques de Cajicá',
+    engagement_label: 'indeciso',
+    engagement_score: 55,
+    engagement_reason: 'Preguntó varias veces por precios y plazos sin decidir',
   },
   {
     id: 'mock-lead-sofia',
